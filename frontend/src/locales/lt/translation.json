@@ -1,0 +1,223 @@
+{
+  "common": {
+    "save": "Išsaugoti",
+    "cancel": "Atšaukti",
+    "delete": "Ištrinti",
+    "edit": "Redaguoti",
+    "search": "Paieška",
+    "loading": "Kraunama...",
+    "no_data": "Nėra duomenų",
+    "actions": "Veiksmai",
+    "view": "Peržiūrėti",
+    "add": "Pridėti",
+    "yes": "Taip",
+    "no": "Ne",
+    "status": "Būsena",
+    "date": "Data",
+    "number": "Numeris",
+    "sum": "Suma",
+    "profit": "Pelnas",
+    "client": "Klientas",
+    "carrier": "Vežėjas",
+    "route": "Maršrutas",
+    "manager": "Vadybininkas",
+    "notes": "Pastabos",
+    "months": {
+      "january": "Sausis",
+      "february": "Vasaris",
+      "march": "Kovas",
+      "april": "Balandis",
+      "may": "Gegužė",
+      "june": "Birželis",
+      "july": "Liepa",
+      "august": "Rugpjūtis",
+      "september": "Rugsėjis",
+      "october": "Spalis",
+      "november": "Lapkritis",
+      "december": "Gruodis"
+    },
+    "periods": {
+      "month": "Mėnuo",
+      "all_time": "Nuo pradžių",
+      "label": "Laikotarpis"
+    }
+  },
+  "navigation": {
+    "dashboard": "Pagrindinis",
+    "orders": "Užsakymai",
+    "invoices": "Sąskaitos",
+    "partners": "Partneriai",
+    "settings": "Nustatymai",
+    "expeditions": "Ekspedicijos",
+    "mail": "Paštas",
+    "suppliers": "Tiekėjai",
+    "categories": "Kategorijos",
+    "company_info": "Įmonės rekvizitai",
+    "user_settings": "Vartotojo nustatymai",
+    "logout": "Atsijungti",
+    "transport_module": "Transportas",
+    "expenses_module": "Kitos išlaidos"
+  },
+  "orders": {
+    "title": "Užsakymai",
+    "add_new": "Pridėti naują užsakymą",
+    "table": {
+      "date": "Užsakymo data",
+      "number": "Numeris",
+      "email_received": "Gautas laiškas",
+      "client": "Klientas",
+      "docs_received": "Gauti dok.",
+      "client_price": "Kliento kaina (be PVM)",
+      "route": "Maršrutas",
+      "carrier": "Vežėjas",
+      "carrier_price": "Vežėjo kaina (be PVM)",
+      "profit": "Pelnas",
+      "actions": "Veiksmai",
+      "no_orders": "Užsakymų nerasta",
+      "multiple_carriers": "Keli vežėjai"
+    },
+    "status": {
+      "new": "Naujas",
+      "in_progress": "Vykdomas",
+      "completed": "Užbaigtas",
+      "cancelled": "Atšauktas",
+      "paid": "Apmokėta",
+      "not_paid": "Neapmokėta",
+      "overdue": "Vėluoja"
+    },
+    "tooltips": {
+      "paid": "Apmokėta",
+      "overdue": "Vėluojama {{days}} d.",
+      "due_today": "Terminas šiandien",
+      "days_left": "Liko {{days}} d.",
+      "no_invoice": "Sąskaita neišrašyta"
+    }
+  },
+  "partners": {
+    "title": "Partneriai",
+    "table": {
+      "name": "Pavadinimas",
+      "code": "Kodas",
+      "vat": "PVM",
+      "address": "Adresas",
+      "contact": "Kontaktas",
+      "phone": "Tel.",
+      "email": "El. paštas",
+      "all_emails": "Visi el. paštai",
+      "term": "Terminas",
+      "type": "Tipas",
+      "status": "Būsena",
+      "contacts_count": "Kontaktai",
+      "actions": "Veiksmai",
+      "no_partners": "Partnerių nerasta"
+    },
+    "status": {
+      "active": "Aktyvus",
+      "blocked": "Užblokuotas"
+    }
+  },
+  "expeditions": {
+    "title": "Ekspedicijos",
+    "table": {
+      "number": "Ekspedicijos nr.",
+      "created": "Sukurta",
+      "partner": "Partneris",
+      "route": "Maršrutas",
+      "loading_unloading": "Pakrovimas/Iškrovimas",
+      "status": "Statusas",
+      "payment_status": "Mokėjimo būsena",
+      "documents": "Dokumentai",
+      "no_expeditions": "Ekspedicijų nerasta."
+    },
+    "filters": {
+      "all_statuses": "Visi statusai",
+      "all_types": "Visi tipai"
+    },
+    "types": {
+      "carrier": "Vežėjas",
+      "warehouse": "Sandėlis"
+    }
+  },
+  "dashboard": {
+    "title": "Pagrindinis",
+    "stats": {
+      "unpaid_sales": "Neapmokėtos pardavimo sąskaitos",
+      "overdue_sales": "Vėluojančios pardavimo sąskaitos",
+      "unpaid_purchase": "Neapmokėtos pirkimo sąskaitos",
+      "overdue_purchase": "Vėluojančios pirkimo sąskaitos",
+      "new_orders": "Nauji užsakymai (šį mėn.)",
+      "unfinished_orders": "Nebaigti užsakymai",
+      "profit_month": "Šio mėnesio pelno prognozė"
+    },
+    "alerts": {
+      "title": "Pranešimai ir įspėjimai"
+    },
+    "sections": {
+      "unfinished_orders": "Nebaigti užsakymai",
+      "sales_no_invoice": "Pardavimai be sąskaitų",
+      "carrier_no_invoice": "Vežėjai be sąskaitų"
+    },
+    "finance": {
+      "title": "Finansai",
+      "profit_from_orders": "Pelnas (iš užsakymų)",
+      "profit_description": "Užsakymai sukurti {{period}}",
+      "client_prices": "Klientų kainos",
+      "carrier_prices": "Vežėjų kainos",
+      "other_costs": "Kitos išlaidos",
+      "carrier_and_other_costs": "Vežėjų ir kitos išlaidos",
+      "invoices_issued_for": "Išrašyta sąskaitų už",
+      "invoices_received_for": "Gauta sąskaitų už",
+      "invoices_description": "Sąskaitos išrašytos {{period}}",
+      "paid": "Apmokėtos",
+      "unpaid": "Neapmokėtos"
+    },
+    "invoices_stats": {
+      "title": "Sąskaitos",
+      "paid_sales": "Apmokėtos išrašytos",
+      "unpaid_sales": "Neapmokėtos išrašytos",
+      "overdue_sales": "Vėluojančios išrašytos",
+      "paid_purchase": "Apmokėtos gautos",
+      "unpaid_purchase": "Neapmokėtos gautos",
+      "overdue_purchase": "Vėluojančios gautos"
+    },
+    "orders_stats": {
+      "title": "Užsakymai",
+      "finished": "Baigti",
+      "unfinished": "Nebaigti",
+      "new": "Nauji (šį mėn.)"
+    }
+  },
+  "invoices": {
+    "title": "Sąskaitos",
+    "invoice_number": "Sąskaitos Nr.",
+    "invoice_date": "Sąskaitos data",
+    "due_date": "Mokėjimo terminas",
+    "amount": "Suma",
+    "vat": "PVM",
+    "total": "Iš viso",
+    "issued": "Išrašyta",
+    "received": "Gauta",
+    "paid": "Apmokėta",
+    "not_paid": "Neapmokėta",
+    "partially_paid": "Dalinai apmokėta",
+    "overdue": "Vėluoja",
+    "table": {
+      "number": "Sąskaitos numeris",
+      "type": "Tipas",
+      "client": "Klientas",
+      "amount": "Suma",
+      "issue_date": "Išrašymo data",
+      "due_date": "Mokėjimo terminas",
+      "payment_status": "Mokėjimo statusas",
+      "actions": "Veiksmai",
+      "no_sales_invoices": "Pardavimo sąskaitų nerasta",
+      "with_vat": "(su PVM)",
+      "without_vat": "(be PVM)",
+      "overdue_paid": "(Paveluota {{days}} d.)",
+      "paid_on_time": "(Apmokėta laiku)",
+      "overdue": "(Vėluojama {{days}} d.)",
+      "days_left": "(Liko {{days}} d.)",
+      "due_today": "(Terminas šiandien)"
+    }
+  }
+}

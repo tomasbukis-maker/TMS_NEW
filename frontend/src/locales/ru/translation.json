@@ -1,0 +1,223 @@
+{
+  "common": {
+    "save": "Сохранить",
+    "cancel": "Отмена",
+    "delete": "Удалить",
+    "edit": "Редактировать",
+    "search": "Поиск",
+    "loading": "Загрузка...",
+    "no_data": "Нет данных",
+    "actions": "Действия",
+    "view": "Просмотр",
+    "add": "Добавить",
+    "yes": "Да",
+    "no": "Нет",
+    "status": "Статус",
+    "date": "Дата",
+    "number": "Номер",
+    "sum": "Сумма",
+    "profit": "Прибыль",
+    "client": "Клиент",
+    "carrier": "Перевозчик",
+    "route": "Маршрут",
+    "manager": "Менеджер",
+    "notes": "Примечания",
+    "months": {
+      "january": "Январь",
+      "february": "Февраль",
+      "march": "Март",
+      "april": "Апрель",
+      "may": "Май",
+      "june": "Июнь",
+      "july": "Июль",
+      "august": "Август",
+      "september": "Сентябрь",
+      "october": "Октябрь",
+      "november": "Ноябрь",
+      "december": "Декабрь"
+    },
+    "periods": {
+      "month": "Месяц",
+      "all_time": "С начала",
+      "label": "Период"
+    }
+  },
+  "navigation": {
+    "dashboard": "Главная",
+    "orders": "Заказы",
+    "invoices": "Счета",
+    "partners": "Партнеры",
+    "settings": "Настройки",
+    "expeditions": "Экспедиции",
+    "mail": "Почта",
+    "suppliers": "Поставщики",
+    "categories": "Категории",
+    "company_info": "Реквизиты компании",
+    "user_settings": "Настройки пользователя",
+    "logout": "Выйти",
+    "transport_module": "Транспорт",
+    "expenses_module": "Другие расходы"
+  },
+  "orders": {
+    "title": "Заказы",
+    "add_new": "Добавить новый заказ",
+    "table": {
+      "date": "Дата заказа",
+      "number": "Номер",
+      "email_received": "Письмо получено",
+      "client": "Клиент",
+      "docs_received": "Док. получены",
+      "client_price": "Цена клиента (без НДС)",
+      "route": "Маршрут",
+      "carrier": "Перевозчик",
+      "carrier_price": "Цена перевозчика (без НДС)",
+      "profit": "Прибыль",
+      "actions": "Действия",
+      "no_orders": "Заказы не найдены",
+      "multiple_carriers": "Несколько перевозчиков"
+    },
+    "status": {
+      "new": "Новый",
+      "in_progress": "В процессе",
+      "completed": "Завершен",
+      "cancelled": "Отменен",
+      "paid": "Оплачен",
+      "not_paid": "Не оплачен",
+      "overdue": "Просрочен"
+    },
+    "tooltips": {
+      "paid": "Оплачено",
+      "overdue": "Просрочка {{days}} д.",
+      "due_today": "Срок сегодня",
+      "days_left": "Осталось {{days}} д.",
+      "no_invoice": "Счет не выписан"
+    }
+  },
+  "partners": {
+    "title": "Партнеры",
+    "table": {
+      "name": "Наименование",
+      "code": "Код",
+      "vat": "НДС",
+      "address": "Адрес",
+      "contact": "Контакт",
+      "phone": "Тел.",
+      "email": "Эл. почта",
+      "all_emails": "Все эл. адреса",
+      "term": "Срок",
+      "type": "Тип",
+      "status": "Статус",
+      "contacts_count": "Контакты",
+      "actions": "Действия",
+      "no_partners": "Партнеры не найдены"
+    },
+    "status": {
+      "active": "Активен",
+      "blocked": "Заблокирован"
+    }
+  },
+  "expeditions": {
+    "title": "Экспедиции",
+    "table": {
+      "number": "№ Экспедиции",
+      "created": "Создана",
+      "partner": "Партнер",
+      "route": "Маршрут",
+      "loading_unloading": "Погрузка/Разгрузка",
+      "status": "Статус",
+      "payment_status": "Статус оплаты",
+      "documents": "Документы",
+      "no_expeditions": "Экспедиции не найдены."
+    },
+    "filters": {
+      "all_statuses": "Все статусы",
+      "all_types": "Все типы"
+    },
+    "types": {
+      "carrier": "Перевозчик",
+      "warehouse": "Склад"
+    }
+  },
+  "dashboard": {
+    "title": "Главная",
+    "stats": {
+      "unpaid_sales": "Неоплаченные счета продаж",
+      "overdue_sales": "Просроченные счета продаж",
+      "unpaid_purchase": "Неоплаченные счета покупок",
+      "overdue_purchase": "Просроченные счета покупок",
+      "new_orders": "Новые заказы (в этом мес.)",
+      "unfinished_orders": "Незавершенные заказы",
+      "profit_month": "Прогноз прибыли на месяц"
+    },
+    "alerts": {
+      "title": "Уведомления и предупреждения"
+    },
+    "sections": {
+      "unfinished_orders": "Незавершенные заказы",
+      "sales_no_invoice": "Продажи без счетов",
+      "carrier_no_invoice": "Перевозчики без счетов"
+    },
+    "finance": {
+      "title": "Финансы",
+      "profit_from_orders": "Прибыль (из заказов)",
+      "profit_description": "Заказы созданы {{period}}",
+      "client_prices": "Цены клиентов",
+      "carrier_prices": "Цены перевозчиков",
+      "other_costs": "Другие расходы",
+      "carrier_and_other_costs": "Расходы на перевозчиков и др.",
+      "invoices_issued_for": "Выписано счетов на",
+      "invoices_received_for": "Получено счетов на",
+      "invoices_description": "Счета выписаны {{period}}",
+      "paid": "Оплачено",
+      "unpaid": "Не оплачено"
+    },
+    "invoices_stats": {
+      "title": "Счета",
+      "paid_sales": "Оплачено выписанных",
+      "unpaid_sales": "Не оплачено выписанных",
+      "overdue_sales": "Просрочено выписанных",
+      "paid_purchase": "Оплачено полученных",
+      "unpaid_purchase": "Не оплачено полученных",
+      "overdue_purchase": "Просрочено полученных"
+    },
+    "orders_stats": {
+      "title": "Заказы",
+      "finished": "Завершено",
+      "unfinished": "Не завершено",
+      "new": "Новые (в этом мес.)"
+    }
+  },
+  "invoices": {
+    "title": "Счета",
+    "invoice_number": "№ Счета",
+    "invoice_date": "Дата счета",
+    "due_date": "Срок оплаты",
+    "amount": "Сумма",
+    "vat": "НДС",
+    "total": "Итого",
+    "issued": "Выставлен",
+    "received": "Получен",
+    "paid": "Оплачен",
+    "not_paid": "Не оплачен",
+    "partially_paid": "Частично оплачен",
+    "overdue": "Просрочен",
+    "table": {
+      "number": "Номер счета",
+      "type": "Тип",
+      "client": "Клиент",
+      "amount": "Сумма",
+      "issue_date": "Дата выписки",
+      "due_date": "Срок оплаты",
+      "payment_status": "Статус оплаты",
+      "actions": "Действия",
+      "no_sales_invoices": "Счета продаж не найдены",
+      "with_vat": "(с НДС)",
+      "without_vat": "(без НДС)",
+      "overdue_paid": "(Просрочено на {{days}} д.)",
+      "paid_on_time": "(Оплачено вовремя)",
+      "overdue": "(Просрочка {{days}} д.)",
+      "days_left": "(Осталось {{days}} д.)",
+      "due_today": "(Срок сегодня)"
+    }
+  }
+}

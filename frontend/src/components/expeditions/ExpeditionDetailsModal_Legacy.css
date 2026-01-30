@@ -1,0 +1,760 @@
+.expedition-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2100;
+  padding: 24px;
+}
+
+.expedition-modal {
+  background: #ffffff;
+  border-radius: 14px;
+  width: min(960px, 98%);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 35px 75px -30px rgba(15, 23, 42, 0.55);
+}
+
+@media (min-width: 1200px) {
+  .expedition-modal {
+    width: min(1120px, 96%);
+  }
+}
+
+.expedition-modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.expedition-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.expedition-reorder-toggle,
+.expedition-reorder-reset {
+  border: 1px solid #cbd5f5;
+  background: #f8fafc;
+  color: #1e293b;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.expedition-reorder-toggle.active {
+  border-color: #0284c7;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.expedition-reorder-reset {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  color: #c2410c;
+}
+
+.expedition-reorder-toggle:hover,
+.expedition-reorder-reset:hover {
+  background: #e2e8f0;
+}
+
+.expedition-reorder-toggle.active:hover {
+  background: #bae6fd;
+}
+
+.expedition-reorder-reset:hover {
+  background: #ffedd5;
+}
+
+.expedition-modal-header h2 {
+  margin: 0;
+  font-size: 22px;
+  color: #0f172a;
+}
+
+.expedition-modal-header p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #475569;
+}
+
+.expedition-modal-status {
+  font-weight: 600;
+  color: #0284c7;
+}
+
+.expedition-modal-close {
+  background: none;
+  border: none;
+  font-size: 26px;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.expedition-modal-body {
+  padding: 26px 32px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.expedition-overview-grid,
+.expedition-main-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.expedition-overview-grid {
+  margin-bottom: 4px;
+  justify-content: space-between;
+}
+
+.expedition-main-grid {
+  justify-content: flex-start;
+}
+
+.expedition-overview-items {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px 16px;
+}
+
+.expedition-badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.expedition-route-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 16px;
+}
+
+.expedition-overview-items .label,
+.expedition-route-grid .label,
+.expedition-payment-overview .label,
+.expedition-document-summary .label {
+  display: block;
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.expedition-overview-items .value,
+.expedition-route-grid .value,
+.expedition-payment-overview .value,
+.expedition-document-summary .value {
+  display: block;
+  margin-top: 2px;
+  font-size: 13px;
+  color: #0f172a;
+  font-weight: 600;
+  word-break: break-word;
+}
+
+.expedition-card--reordering {
+  border-style: dashed;
+  cursor: grab;
+}
+
+.expedition-card--reordering:active {
+  cursor: grabbing;
+}
+
+.expedition-card--dragging {
+  opacity: 0.65;
+}
+
+.expedition-card--hover {
+  border-color: #38bdf8;
+  background: #f0f9ff;
+}
+
+.expedition-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 344px;
+  flex: 0 0 344px;
+  max-width: 100%;
+  box-sizing: border-box;
+  break-inside: avoid;
+  margin-bottom: 18px;
+  vertical-align: top;
+}
+
+.expedition-card--summary {
+  width: 384px;
+  flex: 0 0 384px;
+}
+
+.expedition-card--main {
+  width: 344px;
+  flex: 0 0 344px;
+}
+
+@media (max-width: 1100px) {
+  .expedition-card--summary {
+    width: 344px;
+    flex: 0 0 344px;
+  }
+}
+
+@media (max-width: 860px) {
+  .expedition-card,
+  .expedition-card--summary,
+  .expedition-card--main {
+    width: 100%;
+    flex: 1 1 100%;
+  }
+}
+
+.expedition-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.expedition-card-header-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.expedition-card-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+}
+
+.reorder-hint {
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.expedition-card-header h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.expedition-status-badge,
+.expedition-progress-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.expedition-status-badge {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.expedition-status-badge--paid {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.expedition-status-badge--partially_paid {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.expedition-status-badge--not_paid {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.expedition-status-badge--overdue {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.expedition-status-badge--default {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.expedition-progress-badge {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.expedition-progress-badge--new {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.expedition-progress-badge--in_progress {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.expedition-progress-badge--completed {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.expedition-progress-badge--cancelled {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.expedition-progress-badge--default {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.expedition-modal-notes {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.6;
+  border: 1px solid #e2e8f0;
+}
+
+.expedition-modal-notes .placeholder {
+  color: #94a3b8;
+  font-style: italic;
+}
+
+.expedition-modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.expedition-modal-close-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: none;
+  background: #0ea5e9;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.expedition-modal-close-btn:hover {
+  background: #0284c7;
+}
+
+.expedition-modal-mail-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.expedition-modal-mail-list.compact {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.expedition-modal-mail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+}
+
+.mail-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.mail-item-subject {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mail-item-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.mail-attachment-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mail-attachment-list a {
+  color: #0284c7;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.mail-attachment-list a:hover {
+  text-decoration: underline;
+}
+
+.expedition-modal-mail-empty {
+  font-size: 12px;
+  color: #64748b;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 12px;
+  border: 1px dashed #cbd5f5;
+}
+
+.expedition-card-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.expedition-card-controls button {
+  border: 1px solid #cbd5f5;
+  background: #fff;
+  color: #334155;
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.expedition-card-controls button:hover:not(:disabled) {
+  background: #e0f2fe;
+  border-color: #0284c7;
+  color: #0369a1;
+}
+
+.expedition-card-controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.expedition-payment-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px 16px;
+}
+
+.expedition-document-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.expedition-document-summary .summary-chip {
+  background: #e2e8f0;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.expedition-modal-add-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border: 1px dashed #94a3b8;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.expedition-add-doc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.expedition-add-doc-header h4 {
+  margin: 0;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.expedition-add-doc-toggle {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #94a3b8;
+  background: #fff;
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.expedition-add-doc-toggle:hover {
+  border-color: #0284c7;
+  color: #0369a1;
+}
+
+.expedition-document-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 6px;
+}
+
+.document-form-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 16px;
+}
+
+.document-form-row.compact {
+  gap: 10px 12px;
+}
+
+.document-form-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.document-form-row input,
+.document-form-row select {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  background: #fff;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.document-form-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.document-form-actions button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #0ea5e9;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.document-form-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.document-form-actions button:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.document-form-error {
+  color: #dc2626;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.expedition-modal-document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.expedition-modal-document-list.scrollable {
+  max-height: 240px;
+  overflow-y: auto;
+  padding-right: 6px;
+}
+
+.expedition-modal-document-list ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: #334155;
+}
+
+.document-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.document-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.document-type {
+  color: #0f172a;
+  text-transform: capitalize;
+}
+
+.document-amount {
+  color: #0ea5e9;
+}
+
+.document-item-meta {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.expedition-payment-date-form {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px dashed #cbd5f5;
+  background: #fff;
+}
+
+.expedition-payment-date-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+  font-weight: 600;
+}
+
+.expedition-payment-date-form input {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #cbd5f5;
+  background: #fff;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.payment-date-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.payment-date-clear,
+.payment-date-save {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: none;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.payment-date-clear {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.payment-date-clear:hover:not(:disabled) {
+  background: #cbd5f5;
+}
+
+.payment-date-save {
+  background: #0ea5e9;
+  color: #fff;
+}
+
+.payment-date-save:hover:not(:disabled) {
+  background: #0284c7;
+}
+
+.payment-date-clear:disabled,
+.payment-date-save:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.payment-date-message {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.payment-date-error {
+  color: #dc2626;
+}
+
+.payment-date-success {
+  color: #16a34a;
+}
+
+@media (max-width: 768px) {
+  .expedition-modal {
+    width: 100%;
+  }
+
+  .expedition-card-grid,
+  .document-form-row {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .expedition-modal-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .expedition-modal-column--side {
+    order: -1;
+  }
+}

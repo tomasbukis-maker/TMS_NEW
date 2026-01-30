@@ -1,0 +1,3194 @@
+from rest_framework import viewsets, status, serializers
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.pagination import PageNumberPagination
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters
+from django.template.loader import render_to_string
+from django.shortcuts import render
+from django.http import HttpResponse
+from django.conf import settings
+from django.core.mail import EmailMessage, get_connection
+from smtplib import SMTPException
+import socket
+from apps.mail.email_logger import send_email_message_with_logging
+from django.db import transaction, connections, IntegrityError
+from django.db.models import Q, Count, Sum
+from decimal import Decimal
+from datetime import datetime
+import logging
+from .models import (
+    Order,
+    OrderCarrier,
+    OrderCost,
+    City,
+    VehicleType,
+    OtherCostType,
+    CargoItem,
+    AutocompleteSuggestion,
+    RouteContact,
+    OrderCarrierDocument,
+    RouteStop,
+)
+from .utils import (
+    generate_order_number, 
+    find_expedition_number_gaps, 
+    get_first_available_expedition_gap_number,
+    find_order_number_gaps,
+    get_first_available_order_gap_number
+)
+from apps.settings.models import OrderSettings, CompanyInfo
+from apps.settings.email_utils import render_email_template
+from apps.invoices.utils import amount_to_words_lt
+from .serializers import (
+    OrderSerializer, OrderStatusChangeSerializer,
+    OrderCarrierSerializer, OrderCostSerializer, CitySerializer, VehicleTypeSerializer, OtherCostTypeSerializer, CargoItemSerializer,
+    AutocompleteSuggestionSerializer, RouteContactSerializer,
+    OrderCarrierDocumentSerializer, RouteStopSerializer,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def get_contract_labels(lang):
+    """Grąžina vertimus sutarties šablonui (vežėjo arba kliento)"""
+    if lang == 'en':
+        return {
+            'contract_title': 'SINGLE CARGO TRANSPORTATION AGREEMENT',
+            'number': 'No.',
+            'date': 'Date',
+            'parties_between': 'Between',
+            'parties_and': 'and',
+            'customer': 'Customer',
+            'carrier': 'Carrier',
+            'code': 'Code',
+            'vat_code': 'VAT',
+            'address': 'Address',
+            'correspondence': 'Corresp.',
+            'phone': 'Phone',
+            'email': 'Email',
+            'bank': 'Bank',
+            'account': 'Acc.',
+            'cargo': 'Cargo:',
+            'description': 'Description:',
+            'type': 'Type:',
+            'weight': 'Weight:',
+            'dimensions': 'Dimensions:',
+            'ldm': 'LDM:',
+            'quantity': 'Quantity:',
+            'special_requirements': 'Special requirements:',
+            'notes': 'Notes:',
+            'route_title': 'ROUTE',
+            'loading_short': 'LOADING',
+            'unloading_short': 'UNLOADING',
+            'loading_label': 'LOADING',
+            'unloading_label': 'UNLOADING',
+            'forklift': 'Forklift',
+            'crane': 'Crane',
+            'special_equipment': 'Special equipment',
+            'fragile_label': 'Fragile',
+            'hazardous_label': 'Hazardous',
+            'temp_control': 'Temperature control',
+            'permit': 'Permit required',
+            'cargo_default': 'Cargo',
+            'kg': 'kg.',
+            't': 't.',
+            'pallet_count': 'pal.',
+            'package_count': 'pk.',
+            'pieces': 'pcs.',
+            'partial_cargo': 'Partial cargo',
+            'route_from_title': 'Sender, loading address, Loading date:',
+            'route_to_title': 'Receiver, delivery address, Delivery date:',
+            'sender': 'Sender:',
+            'receiver': 'Receiver:',
+            'loading_date': 'Loading:',
+            'unloading_date': 'Delivery:',
+            'price_title': 'Transportation price:',
+            'price_net': 'Price without VAT:',
+            'vat_zero': 'VAT 0% - 0.00 EUR',
+            'vat_zero_text': '(Zero VAT rate applied)',
+            'price_total': 'Price with VAT:',
+            'payment_term_title': 'Payment term:',
+            'rights_obligations_carrier': 'Carrier\'s rights and obligations:',
+            'rights_obligations_customer': 'Customer\'s rights and obligations:',
+            'signatures': '(Name, surname, signature, date)',
+            'pallet_cargo': 'Palletized cargo',
+            'stackable': 'stackable',
+            'pieces': 'pcs.',
+            'pallet_count': 'pal.',
+            'package_count': 'pk.',
+            'default_payment_terms': '30 calendar days after receiving the VAT invoice and CMR with the date of receipt of the cargo and the recipient\'s name, surname, and signature.',
+            'default_carrier_obligations': [
+                'The Carrier must have valid CMR insurance for an amount not less than the value of the cargo being transported.',
+                'The Carrier undertakes to provide a suitable, technically sound vehicle at the time and place specified in the contract.',
+                'The Carrier checks the dates and times, signatures, and stamps of the responsible persons (sender-receiver) on the cargo (CMR) waybill at the arrival and delivery points.',
+                'The Carrier is responsible for the safety of the cargo, its damage, destruction, or shortage from loading into the vehicle until the time of delivery to its legal recipient.',
+                'The Carrier participates from the beginning to the end of loading (unloading) and monitors that the cargo corresponds to the entries in the CMR or TIR documents. Having visually determined the discrepancy and damage of the cargo, makes notes on the cargo (CMR) waybill. If it is impossible for the driver to count the quantity of the cargo or he is not provided with the conditions to participate in the loading, he notes this in the cargo waybill in box 18 and informs the Customer as soon as possible.',
+                'If cargo damage, partial damage, or improper execution of the contract occurs during transportation, the Carrier cannot demand full payment of the transportation price.',
+                'The Carrier is responsible for the arrangement of the cargo and the related costs. For failure to provide the vehicle to the Customer, delay, etc., unless the Sender of the cargo provides otherwise, the Carrier pays 100 EUR/day.',
+                'Directly informs the Customer about all problems encountered (vehicle delay, cargo shortage, damage, reloading, downtime, intermediate stops not related to the transportation process, and others) within two hours. If reported later, in the absence of objective reasons, all related responsibility lies with the Carrier.',
+                'The Carrier declares that the Carrier\'s representative signing this contract (and) other documents is authorized to sign them.'
+            ],
+            'default_customer_obligations': [
+                'The Customer provides the Carrier with all necessary documentation (CMR, TIR, receipts, etc.) on time.',
+                'The Customer is responsible for proper loading, handling, and storage of the cargo until it is handed over to the Carrier.',
+                'The Customer pays the Carrier for transportation according to the contract terms and the specified deadline.',
+                'The Customer informs the Carrier about all cargo peculiarities (hazardous, frozen, etc.).',
+                'The Customer is responsible for all taxes, duties, and other payments related to the order.'
+            ]
+        }
+    elif lang == 'ru':
+        return {
+            'contract_title': 'РАЗОВЫЙ ДОГОВОР НА ПЕРЕВОЗКУ ГРУЗА',
+            'number': '№',
+            'date': 'Дата',
+            'parties_between': 'Между',
+            'parties_and': 'и',
+            'customer': 'Заказчик',
+            'carrier': 'Перевозчик',
+            'code': 'Код',
+            'vat_code': 'НДС',
+            'address': 'Адрес',
+            'correspondence': 'Корр.',
+            'phone': 'Тел.',
+            'email': 'Эл. почта',
+            'bank': 'Банк',
+            'account': 'Счет',
+            'cargo': 'Груз:',
+            'description': 'Описание:',
+            'type': 'Тип:',
+            'weight': 'Вес:',
+            'dimensions': 'Размеры:',
+            'ldm': 'LDM:',
+            'quantity': 'Количество:',
+            'special_requirements': 'Специальные требования:',
+            'notes': 'Примечания:',
+            'route_title': 'МАРШРУТ',
+            'loading_short': 'ПОГРУЗКА',
+            'unloading_short': 'ВЫГРУЗКА',
+            'loading_label': 'ПОГРУЗКА',
+            'unloading_label': 'ВЫГРУЗКА',
+            'forklift': 'Погрузчик',
+            'crane': 'Кран',
+            'special_equipment': 'Спецоборудование',
+            'fragile_label': 'Хрупкое',
+            'hazardous_label': 'Опасный',
+            'temp_control': 'Температурный режим',
+            'permit': 'Требуется разрешение',
+            'cargo_default': 'Груз',
+            'kg': 'кг.',
+            't': 'т.',
+            'pallet_count': 'пал.',
+            'package_count': 'уп.',
+            'pieces': 'шт.',
+            'partial_cargo': 'Сборный груз',
+            'route_from_title': 'Отправитель, адрес погрузки, Дата погрузки:',
+            'route_to_title': 'Получатель, адрес выгрузки, Дата выгрузки:',
+            'sender': 'Отправитель:',
+            'receiver': 'Получатель:',
+            'loading_date': 'Погрузка:',
+            'unloading_date': 'Выгрузка:',
+            'price_title': 'Стоимость перевозки:',
+            'price_net': 'Цена без НДС:',
+            'vat_zero': 'НДС 0% - 0.00 EUR',
+            'vat_zero_text': '(Применяется ставка НДС 0%)',
+            'price_total': 'Цена с НДС:',
+            'payment_term_title': 'Срок оплаты:',
+            'rights_obligations_carrier': 'Права и обязанности Перевозчика:',
+            'rights_obligations_customer': 'Права и обязанности Заказчика:',
+            'signatures': '(Имя, фамилия, подпись, дата)',
+            'pallet_cargo': 'Палетный груз',
+            'stackable': 'штабелируемый',
+            'pieces': 'шт.',
+            'pallet_count': 'пал.',
+            'package_count': 'уп.',
+            'default_payment_terms': '30 календарных дней после получения счета-фактуры НДС и накладной (CMR) с датой получения груза и именем, фамилией, подписью получателя.',
+            'default_carrier_obligations': [
+                'Перевозчик обязан иметь действующее страхование CMR на сумму не менее стоимости перевозимого груза.',
+                'Перевозчик обязуется своевременно предоставить подходящее, технически исправное транспортное средство в указанное в договоре время и место.',
+                'Перевозчик в местах прибытия и доставки сверяет даты и время, подписи и печати ответственных лиц (отправителя-получателя) в товарно-транспортной накладной (CMR).',
+                'Перевозчик несет ответственность за сохранность груза, его повреждение, уничтожение или недостачу с момента погрузки в автомобиль до момента передачи его законному получателю.',
+                'Перевозчик участвует от начала до конца погрузки (выгрузки) и следит за тем, чтобы груз соответствовал записям в документах CMR или TIR. Визуально установив несоответствие и повреждение груза, делает отметки в товарно-транспортной накладной (CMR). Если водителю невозможно подсчитать количество груза или ему не созданы условия для участия в погрузке, он отмечает это в транспортной накладной в графе 18 и как можно скорее сообщает об этом Заказчику.',
+                'Если во время перевозки происходит повреждение груза, частичное повреждение или ненадлежащее исполнение договора, Перевозчик не может требовать полной оплаты стоимости перевозки.',
+                'Перевозчик несет ответственность за размещение груза и связанные с этим расходы. За непредоставление транспортного средства Заказчику, задержку и т.p., если Отправитель груза не предусмотрит иное, Перевозчик выплачивает 100 EUR/день.',
+                'Обо всех возникших проблемах (задержка а/м, недостача груза, повреждение, перегрузка, простои, промежуточные остановки, не связанные с процессом перевозки, и др.) в течение двух часов напрямую информирует Заказчика. При сообщении об этом позднее, при отсутствии объективных причин, вся связанная с этим ответственность ложится на Перевозчика.',
+                'Перевозчик заявляет, что представитель Перевозчика, подписывающий настоящий договор (или) другие документы, уполномочен их подписывать.'
+            ],
+            'default_customer_obligations': [
+                'Заказчик своевременно предоставляет Перевозчику всю необходимую документацию (CMR, TIR, квитанции и др.).',
+                'Заказчик несет ответственность за надлежащую погрузку, обработку и хранение груза до его передачи Перевозчику.',
+                'Заказчик оплачивает перевозку Перевозчику в соответствии с условиями договора и в установленный срок.',
+                'Заказчик информирует Перевозчика обо всех особенностях груза (опасный, замороженный и др.).',
+                'Заказчик несет ответственность за все налоги, пошлины и другие платежи, связанные с заказом.'
+            ]
+        }
+    else: # LT
+        return {
+            'contract_title': 'VIENKARTINĖ KROVINIO PERVEŽIMO SUTARTIS',
+            'number': 'Nr.',
+            'date': 'Data',
+            'parties_between': 'Tarp',
+            'parties_and': 'ir',
+            'customer': 'Užsakovas',
+            'carrier': 'Vežėjas',
+            'code': 'Kodas',
+            'vat_code': 'PVM',
+            'address': 'Adresas',
+            'correspondence': 'Koresp.',
+            'phone': 'Tel',
+            'email': 'El. paštas',
+            'bank': 'Bankas',
+            'account': 'Sąsk.',
+            'cargo': 'Krovinys:',
+            'description': 'Aprašymas:',
+            'type': 'Tipas:',
+            'weight': 'Svoris:',
+            'dimensions': 'Matmenys:',
+            'ldm': 'LDM:',
+            'quantity': 'Kiekis:',
+            'special_requirements': 'Specialūs reikalavimai:',
+            'notes': 'Pastabos:',
+            'route_title': 'MARŠRUTAS',
+            'loading_short': 'PAKROVIMAS',
+            'unloading_short': 'IŠKROVIMAS',
+            'loading_label': 'PAKROVIMAS',
+            'unloading_label': 'IŠKROVIMAS',
+            'forklift': 'Keltuvas',
+            'crane': 'Kranas',
+            'special_equipment': 'Speciali įranga',
+            'fragile_label': 'Trapus',
+            'hazardous_label': 'Pavojingas',
+            'temp_control': 'Temperatūros kontrolė',
+            'permit': 'Reikalingas leidimas',
+            'cargo_default': 'Krovinys',
+            'kg': 'kg.',
+            't': 't.',
+            'pallet_count': 'pal.',
+            'package_count': 'pak.',
+            'pieces': 'vnt.',
+            'partial_cargo': 'Dalinis krovinys',
+            'route_from_title': 'Siuntėjas, pakrovimo adresas, Pakrovimo data:',
+            'route_to_title': 'Gavėjas, pristatymo adresas, Pristatymo data:',
+            'sender': 'Siuntėjas:',
+            'receiver': 'Gavėjas:',
+            'loading_date': 'Pakrovimas:',
+            'unloading_date': 'Iškrovimas:',
+            'price_title': 'Pervežimo kaina:',
+            'price_net': 'Kaina be PVM:',
+            'vat_zero': 'PVM 0% - 0,00 EUR',
+            'vat_zero_text': '(Taikomas 0% PVM tarifas)',
+            'price_total': 'Kaina su PVM:',
+            'payment_term_title': 'Apmokėjimo terminas:',
+            'rights_obligations_carrier': 'Vežėjo teisės ir pareigos:',
+            'rights_obligations_customer': 'Užsakovo teisės ir pareigos:',
+            'signatures': '(Vardas, pavardė, parašas, data)',
+            'pallet_cargo': 'Paletinis krovinys',
+            'stackable': 'stabeliuojamas',
+            'pieces': 'vnt.',
+            'pallet_count': 'Paletės:',
+            'package_count': 'Pakuotės:',
+            'default_payment_terms': '30 kalendorinių dienų po PVM sąskaitos-faktūros ir važtaraščio su krovinio gavimo data ir gavėjo vardu, pavarde, parašu gavimo.',
+            'default_carrier_obligations': [
+                'Vežėjas privalomai turi turėti galiojantį CMR draudimą draudimo sumai nemažesnei nei vežamo krovinio vertė.',
+                'Vežėjas įsipareigoja laiku pateikti tinkamą, techniškai tvarkingą transporto priemonę, sutartyje nurodytu laiku ir nurodytoje vietoje.',
+                'Vežėjas atvykimo ir pristatymo vietose sutikrina krovinio (CMR) važtaraštyje esamas datas ir laikus, atsakingų asmenų (siuntėjo-gavėjo) parašus ir spaudus.',
+                'Vežėjas atsako už krovinio saugumą, jo sugadinimą, sunaikinimą ar trūkumą nuo pakrovimo į automobilį iki krovinio atidavimo laiko jo teisėtam gavėjui.',
+                'Vežėjas dalyvauja nuo pakrovimo (iškrovimo) pradžios iki jo pabaigos ir stebi, kad krovinys atitiktų įrašus CMR ar TIR dokumentuose. Vizualiai nustačius krovinio neatitikimą bei sugadinimą, daro atžymas krovinio (CMR) važtaraštyje. Jeigu vairuotojui neįmanoma suskaičiuoti krovinio kiekio arba jam nėra sudaromos sąlygos dalyvauti pakrovime, tai pažymi krovinio važtaraštyje 18-oje grafoje, bei kuo skubiau apie tai praneša Užsakovui.',
+                'Jeigu pervežimo metu įvyksta krovinio sugadinimas, dalinis sugadinimas, ar netinkamas sutarties vykdymas Vežėjas negali reikalauti pilnai apmokėti pervežimo kainą.',
+                'Vežėjas už krovinio išdėstymą ir su tuo susijusias išlaidas atsako pats. Už transporto priemonės Užsakovui nepateikimą, vėlavimą ir pan. jeigu krovinio Siuntėjas nenumato kitaip, Vežėjas moka po 100 EUR/dieną.',
+                'Apie visas iškilusias problemas (a/m vėlavimas, krovinio trūkumas, sugadinimas, perkrovimas, prastovos, tarpiniai sustojimai, nesusiję su pervežimo procesu ir kitos) dviejų valandų laikotarpyje tiesiogiai informuoja Užsakovą. Pranešus apie tai vėliau, nesant tam objektyvių priežasčių, visa su tuo susijusi atsakomybė tenka Vežėjui.',
+                'Vežėjas pareiškia, kad šią sutartį (ar) kitus dokumentus pasirašantis Vežėjo atstovas yra įgaliotas juos pasirašyti.'
+            ],
+            'default_customer_obligations': [
+                'Užsakovas pateikia Vežėjui visą reikalingą dokumentaciją (CMR, TIR, kvitai ir kt.) laiku.',
+                'Užsakovas atsakingas už krovinio tinkamą pakrovimą, tvarkymą ir saugojimą iki perduodant Vežėjui.',
+                'Užsakovas moka Vežėjui už pervežimą pagal sutarties sąlygas ir nustatytą terminą.',
+                'Užsakovas informuoja Vežėją apie visus krovinio ypatumus (pavojingi, šaldyti, kt.).',
+                'Užsakovas atsakingas už visus mokesčius, mokestinius ir kitus mokėjimų, susijusius su užsakymu.'
+            ]
+        }
+
+
+class OrderPageNumberPagination(PageNumberPagination):
+    """Paginacija užsakymams su page_size parametru"""
+    page_size = 20
+    page_size_query_param = 'page_size'
+    max_page_size = 1000
+
+
+class CityViewSet(viewsets.ModelViewSet):
+    """Miestų/lokacijų CRUD operacijos"""
+    queryset = City.objects.all()
+    serializer_class = CitySerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at']
+    ordering = ['name']
+    
+    def perform_create(self, serializer):
+        """Sukurti naują miestą/lokaciją (jei reikia, bet dažniausiai bus automatiškai)"""
+        serializer.save()
+
+
+class VehicleTypeViewSet(viewsets.ModelViewSet):
+    """Mašinos tipų CRUD operacijos"""
+    queryset = VehicleType.objects.all()
+    serializer_class = VehicleTypeSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['name']
+    ordering_fields = ['name', 'created_at']
+    ordering = ['name']
+    
+    def perform_create(self, serializer):
+        """Sukurti naują mašinos tipą (jei reikia, bet dažniausiai bus automatiškai)"""
+        serializer.save()
+
+
+class OtherCostTypeViewSet(viewsets.ModelViewSet):
+    """Išlaidų tipų CRUD operacijos"""
+    queryset = OtherCostType.objects.all()
+    serializer_class = OtherCostTypeSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['description']
+    ordering_fields = ['description', 'created_at']
+    ordering = ['description']
+    
+    def perform_create(self, serializer):
+        """Sukurti naują išlaidų tipą (jei reikia, bet dažniausiai bus automatiškai)"""
+        serializer.save()
+
+
+class CargoItemViewSet(viewsets.ModelViewSet):
+    """Krovinių aprašymų CRUD operacijos"""
+    queryset = CargoItem.objects.select_related('order').all()
+    serializer_class = CargoItemSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['order']
+    ordering_fields = ['sequence_order', 'created_at']
+    ordering = ['sequence_order', 'id']
+    
+    def perform_create(self, serializer):
+        """Sukurti naują krovinių aprašymą"""
+        serializer.save()
+
+
+class OrderCarrierViewSet(viewsets.ModelViewSet):
+    """Užsakymo vežėjų/sandėlių CRUD operacijos"""
+    queryset = OrderCarrier.objects.select_related('order', 'partner', 'order__manager', 'order__manager__user_settings').prefetch_related(
+        'order__cargo_items'
+    ).all()
+    serializer_class = OrderCarrierSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['order', 'partner', 'carrier_type', 'status']
+    ordering_fields = ['expedition_number', 'created_at', 'sequence_order']
+    ordering = ['-expedition_number', '-created_at']
+    
+    def update(self, request, *args, **kwargs):
+        """Override update to log request data and validation errors"""
+        try:
+            logger.info(f"OrderCarrierViewSet.update: request.data = {request.data}")
+            return super().update(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"OrderCarrierViewSet.update error: {e}", exc_info=True)
+            raise
+    
+    def _prepare_carrier_context(self, carrier, request, lang=None):
+        """Paruošti kontekstą vežėjo sutarties HTML/PDF generavimui"""
+        from apps.settings.models import CompanyInfo, OrderSettings
+        from apps.invoices.utils import amount_to_words
+        
+        # Gauti kalbą iš parametro arba užklausos arba numatytąją
+        if not lang:
+            lang = request.GET.get('lang', request.data.get('lang', 'lt')).lower()
+        if lang not in ['lt', 'en', 'ru']:
+            lang = 'lt'
+        
+        # Užkrauti vežėją su visais susijusiais objektais
+        carrier = OrderCarrier.objects.select_related(
+            'order', 'order__client', 'order__manager', 'order__manager__user_settings', 'partner'
+        ).prefetch_related(
+            'order__cargo_items',
+            'order__route_stops'
+        ).get(pk=carrier.pk)
+        
+        order = carrier.order
+        
+        # Įmonės informacija
+        try:
+            company = CompanyInfo.load()
+        except Exception as e:
+            logger.warning(f"Nepavyko užkrauti CompanyInfo: {e}")
+            company = None
+        
+        # Užsakymų nustatymai
+        try:
+            order_settings = OrderSettings.load()
+        except Exception as e:
+            logger.warning(f"Nepavyko užkrauti OrderSettings: {e}")
+            order_settings = None
+        
+        # Ekspedicijų nustatymai (reikalingi payment_terms)
+        try:
+            from apps.settings.models import ExpeditionSettings
+            expedition_settings = ExpeditionSettings.load()
+        except Exception as e:
+            logger.warning(f"Nepavyko užkrauti ExpeditionSettings: {e}")
+            expedition_settings = None
+        
+        # Konvertuoti PVM tarifą į skaičių
+        # Naudoti vežėjo PVM tarifą, jei jis yra, kitaip užsakymo PVM tarifą
+        vat_rate = float(carrier.vat_rate) if carrier.vat_rate is not None else (float(order.vat_rate) if order.vat_rate is not None else 21.0)
+        
+        # Apskaičiuoti vežėjo kainas su PVM
+        price_net = float(carrier.price_net) if carrier.price_net else 0.0
+        # Jei vat_rate yra 0, vat_amount = 0, price_with_vat = price_net
+        if vat_rate == 0:
+            vat_amount = 0.0
+            price_with_vat = price_net
+        else:
+            vat_amount = price_net * (vat_rate / 100)
+            price_with_vat = price_net + vat_amount
+        
+        # Apskaičiuoti sumą žodžiais
+        if price_with_vat > 0:
+            amount_in_words = amount_to_words(Decimal(str(price_with_vat)), lang=lang)
+        else:
+            if lang == 'en':
+                amount_in_words = "zero EUR"
+            elif lang == 'ru':
+                amount_in_words = "ноль EUR"
+            else:
+                amount_in_words = "nulis EUR"
+        
+        # Gauti vat_rate_article iš vežėjo arba užsakymo
+        vat_rate_article = carrier.vat_rate_article if carrier.vat_rate_article else (order.vat_rate_article if order.vat_rate_article else '')
+        
+        # Bandyti išversti vat_rate_article, jei tai standartinis straipsnis
+        if vat_rate_article and lang != 'lt':
+            from apps.settings.models import PVMRate
+            try:
+                # Bandome rasti atitinkamą tarifą pagal LT tekstą
+                rate_obj = PVMRate.objects.filter(article=vat_rate_article).first()
+                if rate_obj:
+                    if lang == 'en' and rate_obj.article_en:
+                        vat_rate_article = rate_obj.article_en
+                    elif lang == 'ru' and rate_obj.article_ru:
+                        vat_rate_article = rate_obj.article_ru
+            except Exception:
+                pass
+        
+        # Paruošti vertimus šablonui
+        labels = self._get_carrier_labels(lang)
+
+        # Paruošti krovinių informaciją (svorio konvertavimas ir t.t.)
+        for cargo in order.cargo_items.all():
+            # Išversti aprašymą, jei tai numatytasis "Krovinys"
+            orig_desc = (cargo.description or "").strip().lower()
+            if orig_desc in ["krovinys", "cargo", "груз", ""]:
+                cargo.description_display = labels.get('cargo_default', 'Krovinys')
+            else:
+                cargo.description_display = cargo.description
+
+            if cargo.weight_kg:
+                if cargo.weight_kg >= 1000:
+                    weight_val = float(cargo.weight_kg) / 1000
+                    unit = labels.get('t', 't.')
+                    cargo.weight_display = f"{weight_val:.2f} {unit}"
+                else:
+                    unit = labels.get('kg', 'kg.')
+                    cargo.weight_display = f"{float(cargo.weight_kg):.0f} {unit}"
+            else:
+                cargo.weight_display = ""
+
+            # Išversti specialiuosius reikalavimus
+            specs = []
+            if cargo.requires_forklift: specs.append(labels.get('forklift', 'Keltuvas'))
+            if cargo.requires_crane: specs.append(labels.get('crane', 'Kranas'))
+            if cargo.requires_special_equipment: specs.append(labels.get('special_equipment', 'Speciali įranga'))
+            if cargo.fragile: specs.append(labels.get('fragile_label', 'Trapus'))
+            if cargo.hazardous: specs.append(labels.get('hazardous_label', 'Pavojingas'))
+            if cargo.temperature_controlled: specs.append(labels.get('temp_control', 'Temperatūros kontrolė'))
+            if cargo.requires_permit: specs.append(labels.get('permit', 'Reikalingas leidimas'))
+            cargo.special_requirements_display = ", ".join(specs) if specs else ""
+
+            # Išversti vienetus
+            if cargo.units:
+                unit_label = labels.get('pieces', 'vnt.')
+                cargo.units_display = f"{cargo.units} {unit_label}"
+            else:
+                cargo.units_display = ""
+
+            # Išversti tipą
+            if cargo.is_palletized:
+                cargo.type_display = labels.get('pallet_cargo', 'Paletinis krovinys')
+            else:
+                cargo.type_display = labels.get('partial_cargo', 'Dalinis krovinys')
+        
+        # Standartiniai LT tekstai palyginimui (kad žinotume, ar tekstas buvo nukopijuotas automatiškai)
+        default_lt_terms = [
+            '30 kalendorinių dienų po PVM sąskaitos-faktūros ir važtaraščio su krovinio gavimo data ir gavėjo vardu, pavarde, parašu gavimo.',
+            '45 kalendorinių dienų po PVM sąskaitos-faktūros ir važtaraščio su krovinio gavimo data ir gavėjo vardu, pavarde, parašu gavimo.'
+        ]
+        
+        # Jei vežėjo apmokėjimo terminas yra standartinis LT tekstas, jį "išvalome", 
+        # kad template naudotų išverstą labels['default_payment_terms']
+        carrier_payment_terms = carrier.payment_terms or ''
+        if carrier_payment_terms.strip() in default_lt_terms:
+            carrier_payment_terms = ''
+
+        # Pakeisti standartinius tekstus iš nustatymų, jei yra vertimai
+        if order_settings:
+            # Pridėti prie palyginimo sąrašo dabartinius nustatymus
+            if order_settings.payment_terms:
+                default_lt_terms.append(order_settings.payment_terms.strip())
+
+            if lang == 'en' and order_settings.payment_terms_en:
+                labels['default_payment_terms'] = order_settings.payment_terms_en
+            elif lang == 'ru' and order_settings.payment_terms_ru:
+                labels['default_payment_terms'] = order_settings.payment_terms_ru
+            elif lang == 'lt' and order_settings.payment_terms:
+                labels['default_payment_terms'] = order_settings.payment_terms
+                
+            # Pereiti per pareigas ir parinkti teisingą kalbą
+            if order_settings.carrier_obligations:
+                custom_carrier_obs = []
+                for item in order_settings.carrier_obligations:
+                    text = item.get('text', '')
+                    if lang == 'en' and item.get('text_en'):
+                        text = item.get('text_en')
+                    elif lang == 'ru' and item.get('text_ru'):
+                        text = item.get('text_ru')
+                    if text:
+                        custom_carrier_obs.append(text)
+                if custom_carrier_obs:
+                    labels['default_carrier_obligations'] = custom_carrier_obs
+                    
+            if order_settings.client_obligations:
+                custom_client_obs = []
+                for item in order_settings.client_obligations:
+                    text = item.get('text', '')
+                    if lang == 'en' and item.get('text_en'):
+                        text = item.get('text_en')
+                    elif lang == 'ru' and item.get('text_ru'):
+                        text = item.get('text_ru')
+                    if text:
+                        custom_client_obs.append(text)
+                if custom_client_obs:
+                    labels['default_customer_obligations'] = custom_client_obs
+
+        # Tas pats ekspedicijų nustatymams
+        if expedition_settings:
+            # Pridėti prie palyginimo sąrašo
+            if hasattr(expedition_settings, 'payment_terms') and expedition_settings.payment_terms:
+                default_lt_terms.append(expedition_settings.payment_terms.strip())
+
+            # Jei yra ekspedicijos nustatymai, jie turi prioritetą prieš užsakymo nustatymus 
+            if lang == 'en' and hasattr(expedition_settings, 'payment_terms_en') and expedition_settings.payment_terms_en:
+                labels['default_payment_terms'] = expedition_settings.payment_terms_en
+            elif lang == 'ru' and hasattr(expedition_settings, 'payment_terms_ru') and expedition_settings.payment_terms_ru:
+                labels['default_payment_terms'] = expedition_settings.payment_terms_ru
+            elif lang == 'lt' and hasattr(expedition_settings, 'payment_terms') and expedition_settings.payment_terms:
+                labels['default_payment_terms'] = expedition_settings.payment_terms
+
+            if hasattr(expedition_settings, 'carrier_obligations') and expedition_settings.carrier_obligations:
+                custom_carrier_obs = []
+                for item in expedition_settings.carrier_obligations:
+                    text = item.get('text', '')
+                    if lang == 'en' and item.get('text_en'):
+                        text = item.get('text_en')
+                    elif lang == 'ru' and item.get('text_ru'):
+                        text = item.get('text_ru')
+                    if text:
+                        custom_carrier_obs.append(text)
+                if custom_carrier_obs:
+                    labels['default_carrier_obligations'] = custom_carrier_obs
+
+            if hasattr(expedition_settings, 'client_obligations') and expedition_settings.client_obligations:
+                custom_client_obs = []
+                for item in expedition_settings.client_obligations:
+                    text = item.get('text', '')
+                    if lang == 'en' and item.get('text_en'):
+                        text = item.get('text_en')
+                    elif lang == 'ru' and item.get('text_ru'):
+                        text = item.get('text_ru')
+                    if text:
+                        custom_client_obs.append(text)
+                if custom_client_obs:
+                    labels['default_customer_obligations'] = custom_client_obs
+
+        # Dar kartą patikrinti carrier_payment_terms su visais įmanomais LT variantais
+        if carrier_payment_terms.strip() in default_lt_terms:
+            carrier_payment_terms = ''
+
+        return {
+            'carrier': carrier,
+            'carrier_payment_terms': carrier_payment_terms,
+            'order': order,
+            'company': company,
+            'order_settings': order_settings,
+            'expedition_settings': expedition_settings,
+            'amount_in_words': amount_in_words,
+            'vat_rate': vat_rate,
+            'vat_rate_article': vat_rate_article,
+            'price_net': price_net,
+            'vat_amount': vat_amount,
+            'price_with_vat': price_with_vat,
+            'labels': labels,
+            'lang': lang,
+        }
+
+    def _get_carrier_labels(self, lang):
+        """Grąžina vertimus vežėjo sutarties šablonui"""
+        return get_contract_labels(lang)
+    
+    @action(detail=True, methods=['get'])
+    def preview(self, request, pk=None):
+        """Grąžina HTML vežėjo sutarties peržiūrą"""
+        try:
+            carrier = self.get_object()
+            context = self._prepare_carrier_context(carrier, request)
+            return render(request, 'orders/carrier_contract.html', context)
+        except Exception as e:
+            logger.error(f"Klaida generuojant vežėjo preview: {e}", exc_info=True)
+            return HttpResponse(f"Klaida: {str(e)}", status=500)
+    
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Grąžina PDF vežėjo sutarties versiją"""
+        carrier = self.get_object()
+        context = self._prepare_carrier_context(carrier, request)
+        
+        # Generuoti HTML su visais duomenimis
+        html_string = render(request, 'orders/carrier_contract.html', context).content.decode('utf-8')
+        
+        # Tik minimalus valymas - pašalinti tik script tag'us ir action buttons HTML
+        import re
+        html_string = re.sub(r'<div[^>]*class=["\'][^"\']*action-buttons[^"\']*["\'][^>]*>.*?</div>\s*', '', html_string, flags=re.DOTALL)
+        html_string = re.sub(r'<script[^>]*>.*?</script>', '', html_string, flags=re.DOTALL | re.IGNORECASE)
+        
+        pdf_bytes = None
+        
+        # Bandyti naudoti WeasyPrint (geresnė kokybė)
+        try:
+            from weasyprint import HTML, CSS
+            base_url = request.build_absolute_uri('/')
+            html_doc = HTML(string=html_string, base_url=base_url)
+            
+            pdf_css_string = """
+                @page {
+                    size: A4;
+                    margin: 0;
+                }
+            """
+            css_doc = CSS(string=pdf_css_string)
+            
+            pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
+            logger.info("WeasyPrint sėkmingai sugeneravo vežėjo PDF atsisiuntimui")
+            
+        except (ImportError, OSError) as e:
+            logger.warning(f"WeasyPrint nepasiekiamas: {e}, naudojamas xhtml2pdf fallback")
+        except Exception as e:
+            logger.error(f"WeasyPrint klaida: {e}, naudojamas xhtml2pdf fallback")
+        
+        # Fallback į xhtml2pdf
+        if not pdf_bytes:
+            try:
+                from io import BytesIO
+                from xhtml2pdf import pisa
+                
+                result = BytesIO()
+                
+                def link_callback(uri, rel):
+                    from urllib.parse import urlparse, urljoin
+                    from django.conf import settings
+                    import os
+                    
+                    if uri.startswith('data:'):
+                        return uri
+                    
+                    if uri.startswith('/'):
+                        if uri.startswith(settings.MEDIA_URL):
+                            file_path = uri.replace(settings.MEDIA_URL, '')
+                            full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+                            if os.path.exists(full_path):
+                                return f"file://{full_path}"
+                        base_url = request.build_absolute_uri('/').rstrip('/')
+                        return urljoin(base_url, uri)
+                    
+                    return uri
+                
+                pdf = pisa.pisaDocument(
+                    BytesIO(html_string.encode("UTF-8")), 
+                    result,
+                    encoding='UTF-8',
+                    link_callback=link_callback,
+                    show_error_as_pdf=False
+                )
+                
+                if pdf.err:
+                    error_msg = str(pdf.err) if pdf.err else "Nežinoma PDF generavimo klaida"
+                    logger.error(f"xhtml2pdf klaida: {error_msg}")
+                    return HttpResponse(f"Klaida generuojant PDF: {error_msg}", status=500)
+                
+                pdf_bytes = result.getvalue()
+                
+                # Patikrinti, ar tikrai PDF (prasideda su %PDF)
+                if not pdf_bytes or not pdf_bytes.startswith(b'%PDF'):
+                    error_msg = "Generuotas failas nėra PDF formatas"
+                    logger.error(f"xhtml2pdf klaida: {error_msg}")
+                    if pdf_bytes:
+                        logger.error(f"Grąžintas turinys (pirmi 500 simbolių): {pdf_bytes[:500]}")
+                    return HttpResponse(f"Klaida generuojant PDF: {error_msg}", status=500)
+                
+            except ImportError:
+                logger.error("xhtml2pdf nepasiekiamas")
+                return HttpResponse("PDF generavimo biblioteka nepasiekiama. Prašome įdiegti WeasyPrint arba xhtml2pdf.", status=500)
+        
+        if not pdf_bytes:
+            return HttpResponse("Nepavyko generuoti PDF", status=500)
+        
+        carrier_name = carrier.partner.name.replace(' ', '_') if carrier.partner.name else 'vezejas'
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="vezejo_sutartis_{carrier_name}_{carrier.order.order_number or carrier.id}.pdf"'
+        return response
+    
+    @action(detail=True, methods=['post'])
+    def send_email(self, request, pk=None):
+        """Siunčia vežėjo sutarties PDF el. paštu"""
+        carrier = self.get_object()
+        
+        # Priimti masyvą email'ų arba vieną email (atgalinis suderinamumas)
+        emails = request.data.get('emails', [])
+        if not emails:
+            # Jei nėra masyvo, bandyti gauti vieną email
+            email = request.data.get('email', '').strip()
+            if email:
+                emails = [email]
+        
+        if not emails:
+            return Response(
+                {'success': False, 'error': 'Nenurodytas el. pašto adresas'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Pridėti naujus kontaktus, jei yra
+        contacts_to_add = request.data.get('contacts_to_add', [])
+        if contacts_to_add and carrier.partner:
+            from apps.partners.models import Contact
+            for contact_data in contacts_to_add:
+                email_addr = contact_data.get('email', '').strip()
+                if email_addr:
+                    # Patikrinti, ar kontaktas jau egzistuoja
+                    if not Contact.objects.filter(partner=carrier.partner, email__iexact=email_addr).exists():
+                        Contact.objects.create(
+                            partner=carrier.partner,
+                            email=email_addr,
+                            first_name=contact_data.get('first_name', '').strip() or '',
+                            last_name=contact_data.get('last_name', '').strip() or ''
+                        )
+        
+        try:
+            # Gauti kalbą iš užklausos duomenų
+            lang = request.data.get('lang', 'lt')
+            
+            # Generuoti PDF - naudoti TIKSLIAI tą patį metodą kaip pdf() endpoint'as
+            context = self._prepare_carrier_context(carrier, request, lang=lang)
+            html_string = render(request, 'orders/carrier_contract.html', context).content.decode('utf-8')
+            
+            # Tik minimalus valymas - pašalinti tik script tag'us ir action buttons HTML
+            import re
+            html_string = re.sub(r'<div[^>]*class=["\'][^"\']*action-buttons[^"\']*["\'][^>]*>.*?</div>\s*', '', html_string, flags=re.DOTALL)
+            html_string = re.sub(r'<script[^>]*>.*?</script>', '', html_string, flags=re.DOTALL | re.IGNORECASE)
+            
+            pdf_bytes = None
+            
+            # Bandyti naudoti WeasyPrint (geresnė kokybė)
+            try:
+                from weasyprint import HTML, CSS
+                base_url = request.build_absolute_uri('/')
+                html_doc = HTML(string=html_string, base_url=base_url)
+                
+                pdf_css_string = """
+                    @page {
+                        size: A4;
+                        margin: 0;
+                    }
+                """
+                css_doc = CSS(string=pdf_css_string)
+                
+                pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
+                logger.info("WeasyPrint sėkmingai sugeneravo vežėjo PDF el. laiške")
+                
+            except (ImportError, OSError) as e:
+                logger.warning(f"WeasyPrint nepasiekiamas el. laiške: {e}, naudojamas xhtml2pdf fallback")
+            except Exception as e:
+                logger.error(f"WeasyPrint klaida el. laiške: {e}, naudojamas xhtml2pdf fallback")
+            
+            # Fallback į xhtml2pdf
+            if not pdf_bytes:
+                try:
+                    from io import BytesIO
+                    from xhtml2pdf import pisa
+                    
+                    result = BytesIO()
+                    
+                    def link_callback(uri, rel):
+                        from urllib.parse import urlparse, urljoin
+                        from django.conf import settings
+                        import os
+                        
+                        if uri.startswith('data:'):
+                            return uri
+                        
+                        if uri.startswith('/'):
+                            if uri.startswith(settings.MEDIA_URL):
+                                file_path = uri.replace(settings.MEDIA_URL, '')
+                                full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+                                if os.path.exists(full_path):
+                                    return f"file://{full_path}"
+                            base_url = request.build_absolute_uri('/').rstrip('/')
+                            return urljoin(base_url, uri)
+                        
+                        return uri
+                    
+                    pdf = pisa.pisaDocument(
+                        BytesIO(html_string.encode("UTF-8")), 
+                        result,
+                        encoding='UTF-8',
+                        link_callback=link_callback,
+                        show_error_as_pdf=False
+                    )
+                    
+                    if pdf.err:
+                        error_msg = str(pdf.err) if pdf.err else "Nežinoma PDF generavimo klaida"
+                        logger.error(f"xhtml2pdf klaida el. laiške: {error_msg}")
+                        return Response(
+                            {'success': False, 'error': f'PDF generavimo klaida: {error_msg}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        )
+                    
+                    pdf_bytes = result.getvalue()
+                    
+                    # Patikrinti, ar tikrai PDF (prasideda su %PDF)
+                    if not pdf_bytes or not pdf_bytes.startswith(b'%PDF'):
+                        error_msg = "Generuotas failas nėra PDF formatas"
+                        logger.error(f"xhtml2pdf klaida el. laiške: {error_msg}")
+                        if pdf_bytes:
+                            logger.error(f"Grąžintas turinys (pirmi 500 simbolių): {pdf_bytes[:500]}")
+                        return Response(
+                            {'success': False, 'error': f'PDF generavimo klaida: {error_msg}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        )
+                    
+                except ImportError:
+                    logger.error("xhtml2pdf nepasiekiamas el. laiške")
+                    return Response(
+                        {'success': False, 'error': 'PDF generavimo biblioteka nepasiekiama'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            
+            if not pdf_bytes:
+                return Response(
+                    {'success': False, 'error': 'Nepavyko generuoti PDF'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            # Naudoti NotificationSettings nustatymus
+            from apps.settings.models import NotificationSettings
+            config = NotificationSettings.load()
+            
+            if not config.smtp_enabled:
+                return Response(
+                    {'success': False, 'error': 'SMTP siuntimas nėra įjungtas. Įjunkite „Įjungti el. laiškų siuntimą" ir išsaugokite nustatymus.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            missing_fields = []
+            if not config.smtp_host:
+                missing_fields.append('SMTP serveris')
+            if not config.smtp_port:
+                missing_fields.append('SMTP portas')
+            if not config.smtp_username:
+                missing_fields.append('SMTP naudotojas')
+            if not config.smtp_password:
+                missing_fields.append('SMTP slaptažodis')
+            if not config.smtp_from_email:
+                missing_fields.append('Numatytasis siuntėjas (el. paštas)')
+            
+            if missing_fields:
+                return Response(
+                    {'success': False, 'error': 'Nepakanka SMTP nustatymų. Trūksta laukų: ' + ', '.join(missing_fields)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Formuoti from_email su vardu, jei yra
+            from_email = f"{config.smtp_from_name or 'TMS Sistema'} <{config.smtp_from_email}>"
+            
+            # Sukurti SMTP connection su NotificationSettings nustatymais
+            use_tls = bool(config.smtp_use_tls)
+            use_ssl = False
+            if not use_tls and config.smtp_port in (465, 587):
+                use_ssl = config.smtp_port == 465
+            
+            try:
+                # Siųsti į visus nurodytus email adresus
+                sent_count = 0
+                failed_emails = []
+                
+                for email in emails:
+                    try:
+                        logger.info(f"Siunčiamas vežėjo el. laiškas su SMTP nustatymais: host={config.smtp_host}, port={config.smtp_port}, use_tls={use_tls}, use_ssl={use_ssl}, from={from_email}, to={email}")
+                        
+                        connection = get_connection(
+                            backend='django.core.mail.backends.smtp.EmailBackend',
+                            host=config.smtp_host,
+                            port=config.smtp_port,
+                            username=config.smtp_username,
+                            password=config.smtp_password,
+                            use_tls=use_tls,
+                            use_ssl=use_ssl,
+                            timeout=10,
+                        )
+                        
+                        # Siųsti el. laišką naudojant šabloną
+                        # Paruošti context su carrier duomenimis
+                        context = {
+                            'order_number': carrier.order.order_number if carrier.order else 'N/A',
+                            'order_date': carrier.order.order_date.strftime('%Y-%m-%d') if carrier.order and carrier.order.order_date else 'N/A',
+                            'partner_name': carrier.partner.name if carrier.partner else '',
+                            'partner_code': carrier.partner.code if carrier.partner and hasattr(carrier.partner, 'code') else '',
+                            'partner_vat_code': carrier.partner.vat_code if carrier.partner and hasattr(carrier.partner, 'vat_code') else '',
+                            'route_from': carrier.route_from or (carrier.order.route_from if carrier.order else ''),
+                            'route_to': carrier.route_to or (carrier.order.route_to if carrier.order else ''),
+                            'loading_date': carrier.loading_date.strftime('%Y-%m-%d') if carrier.loading_date else '',
+                            'unloading_date': carrier.unloading_date.strftime('%Y-%m-%d') if carrier.unloading_date else '',
+                            'price_net': str(carrier.price_net) if carrier.price_net else '0',
+                            'expedition_number': carrier.expedition_number or '',
+                        }
+                        
+                        # Pridėti vadybininko informaciją jei yra
+                        if carrier.order and carrier.order.manager:
+                            context['manager_name'] = f"{carrier.order.manager.first_name or ''} {carrier.order.manager.last_name or ''}".strip() or carrier.order.manager.username
+                        
+                        # Renderinti šabloną
+                        email_content = render_email_template(
+                            template_type='order_to_carrier',
+                            context=context,
+                            is_auto_generated=True,
+                            lang=lang
+                        )
+                        
+                        subject = email_content['subject']
+                        message = email_content['body_text']
+                        
+                        email_msg = EmailMessage(
+                            subject=subject,
+                            body=message,
+                            from_email=from_email,
+                            to=[email],
+                            connection=connection,
+                        )
+                        
+                        # Sukurti failo vardą su vežėjo sutarties numeriu
+                        carrier_name = carrier.partner.name.replace(' ', '_') if carrier.partner.name else 'vezejas'
+                        filename = f"vezejo_sutartis_{carrier_name}_{carrier.order.order_number or carrier.id}.pdf"
+                        email_msg.attach(filename, pdf_bytes, 'application/pdf')
+                        
+                        # Siųsti su istorijos įrašymu
+                        try:
+                            result = send_email_message_with_logging(
+                                email_message=email_msg,
+                                email_type='expedition',
+                                related_order_id=carrier.order.id if carrier.order else None,
+                                related_expedition_id=carrier.id,
+                                related_partner_id=carrier.partner.id if carrier.partner else None,
+                                sent_by=request.user if hasattr(request, 'user') and request.user.is_authenticated else None,
+                                metadata={'recipient_name': carrier.partner.name if carrier.partner else ''}
+                            )
+                            # Jei grąžina rezultatą su success, patikrinti
+                            if isinstance(result, dict) and not result.get('success'):
+                                logger.error(f"Nepavyko išsiųsti el. laiško į {email}: {result.get('error', 'Nežinoma klaida')}")
+                                failed_emails.append(email)
+                            else:
+                                logger.info(f"Vežėjo el. laiškas sėkmingai išsiųstas į {email} (vežėjas {carrier.partner.name}, užsakymas {carrier.order.order_number})")
+                                sent_count += 1
+                        except Exception as email_error:
+                            logger.error(f"Nepavyko išsiųsti el. laiško į {email}: {email_error}")
+                            failed_emails.append(email)
+                    except Exception as email_error:
+                        logger.error(f"Nepavyko išsiųsti el. laiško į {email}: {email_error}")
+                        failed_emails.append(email)
+                
+                if failed_emails:
+                    return Response({
+                        'success': True,
+                        'sent': sent_count > 0,
+                        'message': f'El. laiškas išsiųstas į {sent_count} adresą/us. Nepavyko siųsti į: {", ".join(failed_emails)}',
+                        'failed_emails': failed_emails
+                    })
+                else:
+                    return Response({
+                        'success': True,
+                        'sent': True,
+                        'message': f'El. laiškas sėkmingai išsiųstas į {sent_count} adresą/us'
+                    })
+                
+            except (SMTPException, OSError, socket.error) as exc:
+                logger.exception('Nepavyko išsiųsti vežėjo el. laiško: %s', exc)
+                error_message = str(exc)
+                # Patobulinti klaidos žinutę
+                if 'authentication failed' in error_message.lower() or 'invalid credentials' in error_message.lower():
+                    error_message = 'SMTP autentifikacijos klaida. Patikrinkite SMTP naudotojo vardą ir slaptažodį.'
+                elif 'connection' in error_message.lower() or 'refused' in error_message.lower():
+                    error_message = 'Nepavyko prisijungti prie SMTP serverio. Patikrinkite SMTP serverio adresą ir portą.'
+                elif 'timeout' in error_message.lower():
+                    error_message = 'SMTP serverio prisijungimo laikas baigėsi. Patikrinkite tinklo ryšį ir SMTP nustatymus.'
+                
+                return Response(
+                    {'success': False, 'error': f'Klaida siunčiant el. laišką: {error_message}', 'sent': False},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+                
+        except Exception as e:
+            logger.error(f"Klaida siunčiant vežėjo el. laišką: {e}", exc_info=True)
+            error_message = str(e)
+            # Patobulinti klaidos žinutę
+            if 'authentication failed' in error_message.lower() or 'invalid credentials' in error_message.lower():
+                error_message = 'SMTP autentifikacijos klaida. Patikrinkite SMTP naudotojo vardą ir slaptažodį.'
+            elif 'connection' in error_message.lower() or 'refused' in error_message.lower():
+                error_message = 'Nepavyko prisijungti prie SMTP serverio. Patikrinkite SMTP serverio adresą ir portą.'
+            elif 'timeout' in error_message.lower():
+                error_message = 'SMTP serverio prisijungimo laikas baigėsi. Patikrinkite tinklo ryšį ir SMTP nustatymus.'
+            
+            return Response(
+                {'success': False, 'error': f'Klaida siunčiant el. laišką: {error_message}', 'sent': False},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    
+    @action(detail=False, methods=['get'])
+    def get_first_gap_number(self, request):
+        """
+        Grąžina pirmą tuščią numerį iš tarpų ekspedicijų numeracijoje.
+        GET /api/orders/carriers/get_first_gap_number/
+        """
+        try:
+            gap_number = get_first_available_expedition_gap_number()
+            if gap_number:
+                return Response({
+                    'has_gap': True,
+                    'gap_number': gap_number,
+                    'message': f'Yra tuščias numeris: {gap_number}'
+                })
+            else:
+                return Response({
+                    'has_gap': False,
+                    'gap_number': None,
+                    'message': 'Tarpų nėra'
+                })
+        except Exception as e:
+            logger.error(f"Klaida gaunant pirmą tuščią ekspedicijos numerį: {e}", exc_info=True)
+            return Response({
+                'has_gap': False,
+                'gap_number': None,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'])
+    def get_gaps(self, request):
+        """
+        Grąžina visus tarpus ekspedicijų numeracijoje pagal tipą.
+        GET /api/orders/carriers/get_gaps/?carrier_type=warehouse
+        """
+        try:
+            max_gaps = int(request.query_params.get('max_gaps', 5))
+            carrier_type = request.query_params.get('carrier_type', 'carrier')
+
+            # Gauti nustatymus pagal tipą
+            if carrier_type == 'warehouse':
+                from apps.settings.models import WarehouseExpeditionSettings
+                settings = WarehouseExpeditionSettings.load()
+                prefix = settings.expedition_prefix or 'WH-'
+                width = settings.expedition_number_width or 5
+            elif carrier_type == 'cost':
+                from apps.settings.models import CostExpeditionSettings
+                settings = CostExpeditionSettings.load()
+                prefix = settings.expedition_prefix or 'ISL-'
+                width = settings.expedition_number_width or 5
+            else:
+                from apps.settings.models import ExpeditionSettings
+                settings = ExpeditionSettings.load()
+                prefix = settings.expedition_prefix or 'E'
+                width = settings.expedition_number_width or 5
+
+            # Rasti tarpus pagal tipą
+            gaps = find_expedition_number_gaps_by_type(carrier_type=carrier_type, max_gaps=max_gaps)
+            
+            formatted_gaps = []
+            for gap in gaps:
+                gap_start, gap_end = gap
+                if gap_start == gap_end:
+                    # Vienas numeris
+                    formatted_gaps.append({
+                        'number': f"{prefix}{gap_start:0{width}d}",
+                        'range': f"{prefix}{gap_start:0{width}d}",
+                        'count': 1
+                    })
+                else:
+                    # Diapazonas
+                    formatted_gaps.append({
+                        'number': f"{prefix}{gap_start:0{width}d}",
+                        'range': f"{prefix}{gap_start:0{width}d} - {prefix}{gap_end:0{width}d}",
+                        'count': gap_end - gap_start + 1
+                    })
+            
+            return Response({
+                'has_gaps': len(formatted_gaps) > 0,
+                'gaps': formatted_gaps,
+                'gaps_count': sum(g['count'] for g in formatted_gaps),
+                'message': f'Rasta {len(formatted_gaps)} tarpų' if formatted_gaps else 'Tarpų nėra'
+            })
+        except Exception as e:
+            logger.error(f"Klaida gaunant ekspedicijų tarpus: {e}", exc_info=True)
+            return Response({
+                'has_gaps': False,
+                'gaps': [],
+                'gaps_count': 0,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def perform_destroy(self, instance):
+        """Trinti ekspediciją su pasirinktina pirkimo sąskaitų trinimu"""
+        from apps.invoices.models import PurchaseInvoice
+        from django.db.models import Q
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Gauti parametrą iš request'o - ar ištrinti susijusias pirkimo sąskaitas
+        query_params = getattr(self.request, 'query_params', {}) or {}
+        delete_related_purchase_invoices = query_params.get(
+            'delete_related_purchase_invoices', 'false'
+        ).lower() == 'true'
+        
+        # Rasti pirkimo sąskaitas, sukurtas iš šios ekspedicijos dokumentų
+        document_invoice_numbers = set(
+            instance.documents.filter(
+                document_type=OrderCarrierDocument.DocumentType.INVOICE
+            ).exclude(invoice_number__isnull=True).exclude(invoice_number='').values_list('invoice_number', flat=True)
+        )
+        
+        matching_invoices = []
+        if document_invoice_numbers:
+            # Rasti PurchaseInvoice, kurios received_invoice_number atitinka dokumentų invoice_number
+            matching_invoices = list(
+                PurchaseInvoice.objects.filter(
+                    received_invoice_number__in=document_invoice_numbers
+                )
+            )
+        
+        # Jei pasirinkta ištrinti pirkimo sąskaitas
+        if delete_related_purchase_invoices and matching_invoices:
+            logger.info(f"Trinamos {len(matching_invoices)} pirkimo sąskaitos kartu su ekspedicija {instance.id}")
+            for invoice in matching_invoices:
+                try:
+                    invoice.delete()
+                    logger.info(f"✓ Ištrinta pirkimo sąskaita {invoice.id} (received_invoice_number: {invoice.received_invoice_number})")
+                except Exception as e:
+                    logger.error(f"❌ Klaida trinant pirkimo sąskaitą {invoice.id}: {e}", exc_info=True)
+        
+        # Ištrinti ekspediciją (visi dokumentai bus ištrinti automatiškai dėl CASCADE)
+        super().perform_destroy(instance)
+
+
+class OrderCarrierDocumentViewSet(viewsets.ModelViewSet):
+    queryset = OrderCarrierDocument.objects.select_related('order_carrier', 'order_carrier__order', 'order_carrier__partner')
+    serializer_class = OrderCarrierDocumentSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['order_carrier', 'document_type']
+
+    def perform_create(self, serializer):
+        document = serializer.save()
+        self._sync_invoice_flags(document.order_carrier)
+        
+        # Jei pridedamas invoice tipo dokumentas, automatiškai sukurti PurchaseInvoice
+        if document.document_type == OrderCarrierDocument.DocumentType.INVOICE:
+            self._create_purchase_invoice_from_document(document)
+
+    def perform_update(self, serializer):
+        document = serializer.save()
+        self._sync_invoice_flags(document.order_carrier)
+
+    def perform_destroy(self, instance):
+        carrier = instance.order_carrier
+        super().perform_destroy(instance)
+        self._sync_invoice_flags(carrier)
+
+    def _sync_invoice_flags(self, carrier: OrderCarrier):
+        """Synchronize invoice_received flags based on existing documents."""
+        if carrier is None:
+            return
+
+        invoice_qs = carrier.documents.filter(document_type=OrderCarrierDocument.DocumentType.INVOICE)
+        has_invoice = invoice_qs.exists()
+
+        desired_date = None
+        if has_invoice:
+            latest = invoice_qs.exclude(received_date__isnull=True).order_by('-received_date', '-created_at').first()
+            if latest and latest.received_date:
+                desired_date = latest.received_date
+            else:
+                latest_any = invoice_qs.order_by('-created_at').first()
+                if latest_any and latest_any.created_at:
+                    desired_date = latest_any.created_at.date()
+
+        update_fields = []
+        if carrier.invoice_received != has_invoice:
+            carrier.invoice_received = has_invoice
+            update_fields.append('invoice_received')
+        if carrier.invoice_received_date != desired_date:
+            carrier.invoice_received_date = desired_date
+            update_fields.append('invoice_received_date')
+
+        if update_fields:
+            carrier.save(update_fields=update_fields)
+    
+    def _create_purchase_invoice_from_document(self, document: OrderCarrierDocument):
+        """Sukurti PurchaseInvoice iš OrderCarrierDocument, jei tai invoice tipo dokumentas"""
+        from apps.invoices.models import PurchaseInvoice, ExpenseCategory
+        from apps.partners.models import Partner
+        from datetime import timedelta
+        from django.utils import timezone
+        
+        logger.info(f"Bandome sukurti PurchaseInvoice iš OrderCarrierDocument {document.id}")
+        
+        # Patikrinti ar dokumentas yra invoice tipo
+        if document.document_type != OrderCarrierDocument.DocumentType.INVOICE:
+            logger.info(f"Dokumentas {document.id} nėra invoice tipo: {document.document_type}")
+            return
+        
+        # Patikrinti ar yra būtini duomenys
+        if not document.invoice_number or not document.amount:
+            logger.warning(f"Dokumentas {document.id} neturi būtinų duomenų: invoice_number={document.invoice_number}, amount={document.amount}")
+            return
+        
+        carrier = document.order_carrier
+        if not carrier:
+            logger.warning(f"Dokumentas {document.id} neturi order_carrier")
+            return
+        
+        partner = carrier.partner
+        if not partner:
+            logger.warning(f"Carrier {carrier.id} neturi partner")
+            return
+        
+        # Patikrinti ar partner yra supplier
+        if not partner.is_supplier:
+            logger.info(f"Partner {partner.id} ({partner.name}) nėra supplier (is_supplier={partner.is_supplier})")
+            return
+        
+        # Patikrinti ar jau nėra tokios PurchaseInvoice su tuo pačiu received_invoice_number
+        existing_invoice = PurchaseInvoice.objects.filter(
+            received_invoice_number=document.invoice_number
+        ).first()
+        
+        if existing_invoice:
+            # Jei jau egzistuoja, susieti su užsakymu (jei dar nėra susieta)
+            order = carrier.order
+            if order and existing_invoice.related_order != order:
+                # Naudoti related_orders ManyToMany, jei related_order jau užimtas
+                if existing_invoice.related_order and existing_invoice.related_order != order:
+                    existing_invoice.related_orders.add(order)
+                else:
+                    existing_invoice.related_order = order
+                    existing_invoice.save(update_fields=['related_order'])
+            return
+        
+        # Apskaičiuoti amount_total su PVM (numatytas PVM tarifas 21%)
+        vat_rate = Decimal('21.00')
+        amount_net = Decimal(str(document.amount))
+        amount_total = amount_net * (1 + vat_rate / 100)
+        
+        # Nustatyti issue_date
+        issue_date = document.issue_date
+        if not issue_date:
+            issue_date = timezone.now().date()
+        
+        # Nustatyti received_date
+        received_date = document.received_date
+        if not received_date:
+            received_date = timezone.now().date()
+        
+        # Nustatyti due_date (pagal partner payment_term_days arba default 30 dienų)
+        payment_term_days = partner.payment_term_days if partner.payment_term_days else 30
+        due_date = issue_date + timedelta(days=payment_term_days)
+        
+        # Gauti default ExpenseCategory (arba pirmąją, jei yra)
+        expense_category = None
+        try:
+            expense_category = ExpenseCategory.objects.first()
+            if expense_category:
+                logger.info(f"Rasta ExpenseCategory: {expense_category.id} - {expense_category.name}")
+            else:
+                logger.warning("Nerasta jokios ExpenseCategory")
+        except Exception as e:
+            logger.error(f"Klaida gaunant ExpenseCategory: {e}", exc_info=True)
+        
+        # ExpenseCategory yra privalomas (blank=False), bet null=True, todėl jei nėra kategorijos, negalime sukurti
+        if not expense_category:
+            logger.error(f"Negalima sukurti PurchaseInvoice be ExpenseCategory. Dokumentas {document.id}")
+            return
+        
+        # Sukurti PurchaseInvoice
+        try:
+            logger.info(f"Kuriama PurchaseInvoice: received_invoice_number={document.invoice_number}, partner={partner.id}, amount_net={amount_net}")
+            purchase_invoice = PurchaseInvoice.objects.create(
+                received_invoice_number=document.invoice_number,
+                partner=partner,
+                related_order=carrier.order,
+                amount_net=amount_net,
+                vat_rate=vat_rate,
+                amount_total=amount_total,
+                issue_date=issue_date,
+                received_date=received_date,
+                due_date=due_date,
+                payment_status=PurchaseInvoice.PaymentStatus.UNPAID,
+                expense_category=expense_category,
+            )
+            
+            # Susieti su užsakymu per ManyToMany ir nustatyti sumą
+            if carrier.order:
+                purchase_invoice.related_orders.add(carrier.order)
+                # Nustatyti related_orders_amounts su užsakymo suma
+                purchase_invoice.related_orders_amounts = [{
+                    'order_id': carrier.order.id,
+                    'amount': str(amount_net)
+                }]
+                purchase_invoice.save(update_fields=['related_orders_amounts'])
+            
+            logger.info(f"✓ Sėkmingai sukurta PurchaseInvoice {purchase_invoice.id} iš OrderCarrierDocument {document.id}")
+        except Exception as e:
+            logger.error(f"❌ Klaida kuriant PurchaseInvoice iš OrderCarrierDocument {document.id}: {e}", exc_info=True)
+
+
+class RouteStopViewSet(viewsets.ModelViewSet):
+    """Maršruto sustojimų ViewSet"""
+    queryset = RouteStop.objects.all()
+    serializer_class = RouteStopSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['order', 'stop_type']
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    """Užsakymų CRUD operacijos"""
+    # Pašalinti 'sales_invoices' iš čia - jis bus pridėtas get_queryset() su Prefetch
+    queryset = Order.objects.select_related('client', 'manager', 'created_by').prefetch_related(
+        'carriers__partner',
+        'cargo_items',
+        'order_sales_invoices__invoice'
+    ).all()
+    
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = OrderPageNumberPagination
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['status', 'order_type', 'manager', 'client', 'route_from', 'route_to']
+    search_fields = [
+        'order_number',
+        'client__name',
+        'client__code',
+        'route_from',
+        'route_to',
+        'route_from_country',
+        'route_from_city',
+        'route_from_address',
+        'route_to_country',
+        'route_to_city',
+        'route_to_address',
+        'manager__username',
+        'order_type',
+        'carriers__partner__name',
+        'carriers__partner__code',
+        'carriers__expedition_number',
+        'notes',
+        'sender_route_from',
+        'receiver_route_to',
+        'vehicle_type',
+    ]
+    ordering_fields = ['created_at', 'order_date', 'loading_date', 'unloading_date']
+    ordering = ['-created_at']
+    
+    def filter_queryset(self, queryset):
+        """Perrašytas filter_queryset su custom paieška pagal visus laukus, įskaitant datas ir kainas"""
+        from django.db.models import Q
+        from datetime import datetime
+        
+        # Pirmiausia pritaikyti standartinius filtrus (SearchFilter, DjangoFilterBackend, etc.)
+        queryset = super().filter_queryset(queryset)
+        
+        # Gauti search parametrą
+        query_params = getattr(self.request, 'query_params', {}) or {}
+        search_query = query_params.get('search', '').strip()
+        
+        if search_query:
+            # Sukurti papildomus Q objektus paieškai pagal datas ir kainas
+            q_objects = Q()
+            
+            # Datos - bandyti parsinti datą ir ieškoti pagal ją
+            try:
+                # Bandyti parsinti kaip datą (YYYY-MM-DD, YYYY-MM-DD HH:MM:SS, DD.MM.YYYY, DD/MM/YYYY)
+                date_formats = ['%Y-%m-%d', '%Y-%m-%d %H:%M:%S', '%d.%m.%Y', '%d/%m/%Y', '%Y.%m.%d', '%Y/%m/%d']
+                parsed_date = None
+                for fmt in date_formats:
+                    try:
+                        parsed_date = datetime.strptime(search_query, fmt)
+                        break
+                    except ValueError:
+                        continue
+                
+                if parsed_date:
+                    # Ieškoti pagal datą visuose datų laukuose
+                    q_objects |= Q(created_at__date=parsed_date.date())
+                    q_objects |= Q(order_date__date=parsed_date.date())
+                    q_objects |= Q(loading_date__date=parsed_date.date())
+                    q_objects |= Q(unloading_date__date=parsed_date.date())
+            except (ValueError, TypeError):
+                # Jei ne data, ignoruoti
+                pass
+            
+            # Kainos - bandyti parsinti kaip skaičių ir ieškoti
+            try:
+                # Bandyti parsinti kaip skaičių (su kableliu arba be)
+                price_value = float(search_query.replace(',', '.'))
+                # Ieškoti pagal kainą (tiksliai)
+                q_objects |= Q(price_net=price_value)
+                q_objects |= Q(client_price_net=price_value)
+                q_objects |= Q(my_price_net=price_value)
+            except (ValueError, TypeError):
+                # Jei ne skaičius, ignoruoti
+                pass
+            
+            # Svoris ir kiti matmenys
+            try:
+                weight_value = float(search_query.replace(',', '.'))
+                q_objects |= Q(weight_kg=weight_value)
+                q_objects |= Q(ldm=weight_value)
+                q_objects |= Q(length_m=weight_value)
+                q_objects |= Q(width_m=weight_value)
+                q_objects |= Q(height_m=weight_value)
+            except (ValueError, TypeError):
+                pass
+            
+            # Jei yra papildomi Q objektai, pritaikyti juos
+            if q_objects:
+                queryset = queryset.filter(q_objects).distinct()
+        
+        return queryset
+    
+    @action(detail=True, methods=['get'], url_path='related-invoices-info')
+    def related_invoices_info(self, request, pk=None):
+        """Grąžina informaciją apie susijusias sąskaitas prieš trinant užsakymą"""
+        from apps.invoices.models import SalesInvoice, PurchaseInvoice, SalesInvoiceOrder
+        from django.db.models import Q
+
+        order = self.get_object()
+
+        sales_invoice_ids = set(SalesInvoice.objects.filter(related_order=order).values_list('id', flat=True))
+        sales_invoice_ids.update(SalesInvoiceOrder.objects.filter(order=order).values_list('invoice_id', flat=True))
+        sales_queryset = SalesInvoice.objects.filter(id__in=sales_invoice_ids).select_related('partner').prefetch_related('related_orders', 'payment_history').distinct()
+
+        sales_data = []
+        for invoice in sales_queryset:
+            # Atnaujinti iš duomenų bazės, kad gautume naujausius duomenis
+            invoice.refresh_from_db()
+            
+            # Apskaičiuoti paid_amount tiesiogiai iš payment_history (su prefetch)
+            paid_amount = invoice.payment_history.aggregate(
+                total=Sum('amount')
+            )['total'] or Decimal('0.00')
+            
+            remaining_amount = invoice.amount_total - paid_amount if invoice.amount_total else Decimal('0.00')
+            
+            linked_via_many = invoice.invoice_orders.filter(order=order).exists()
+            related_orders_data = []
+            for ro in invoice.related_orders.all():
+                related_orders_data.append({
+                    'id': ro.id,
+                    'order_number': ro.order_number or f'Užsakymas #{ro.id}',
+                    'client_price_net': str(ro.client_price_net) if ro.client_price_net is not None else None,
+                })
+            
+            sales_data.append({
+                'id': invoice.id,
+                'invoice_number': invoice.invoice_number,
+                'invoice_type': invoice.invoice_type,
+                'amount_total': str(invoice.amount_total) if invoice.amount_total is not None else None,
+                'paid_amount': str(paid_amount),
+                'remaining_amount': str(remaining_amount),
+                'issue_date': invoice.issue_date.isoformat() if invoice.issue_date else None,
+                'payment_status': invoice.payment_status,
+                'related_order_id': invoice.related_order_id,
+                'related_orders': related_orders_data,
+                'linked_via_related_order': invoice.related_order_id == order.id,
+                'linked_via_related_orders': linked_via_many,
+                'partner': {
+                    'id': invoice.partner_id,
+                    'name': invoice.partner.name if invoice.partner else 'Nenurodyta',
+                } if invoice.partner_id else None,
+            })
+
+        purchase_qs = PurchaseInvoice.objects.filter(
+            Q(related_order=order) | Q(related_orders=order)
+        ).select_related('partner').prefetch_related('related_orders', 'payment_history').distinct()
+
+        purchase_data = []
+        for invoice in purchase_qs:
+            # Atnaujinti iš duomenų bazės, kad gautume naujausius duomenis
+            invoice.refresh_from_db()
+            
+            # Apskaičiuoti paid_amount tiesiogiai iš payment_history (su prefetch)
+            paid_amount = invoice.payment_history.aggregate(
+                total=Sum('amount')
+            )['total'] or Decimal('0.00')
+            
+            remaining_amount = invoice.amount_total - paid_amount if invoice.amount_total else Decimal('0.00')
+            
+            related_orders_data = []
+            linked_via_related_orders = False
+            for related_order in invoice.related_orders.all():
+                if related_order.id == order.id:
+                    linked_via_related_orders = True
+                related_orders_data.append({
+                    'id': related_order.id,
+                    'order_number': related_order.order_number,
+                })
+
+            # Gauti invoice_file_url arba source_attachment_file_url
+            invoice_file_url = None
+            if invoice.invoice_file:
+                invoice_file_url = request.build_absolute_uri(invoice.invoice_file.url) if request else invoice.invoice_file.url
+            else:
+                # Jei nėra invoice_file, patikrinti ar yra susietas attachment'as
+                try:
+                    from apps.mail.models import MailAttachment
+                    attachment = MailAttachment.objects.filter(related_purchase_invoice=invoice).first()
+                    if attachment and attachment.file:
+                        invoice_file_url = request.build_absolute_uri(attachment.file.url) if request else attachment.file.url
+                        print(f"Found attachment for invoice {invoice.id}: {attachment.filename}, URL: {invoice_file_url}")
+                    else:
+                        print(f"No attachment found for invoice {invoice.id}")
+                except Exception as e:
+                    print(f"Error getting attachment for invoice {invoice.id}: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            purchase_data.append({
+                'id': invoice.id,
+                'invoice_number': invoice.invoice_number,
+                'received_invoice_number': invoice.received_invoice_number,
+                'amount_total': str(invoice.amount_total) if invoice.amount_total is not None else None,
+                'paid_amount': str(paid_amount),
+                'remaining_amount': str(remaining_amount),
+                'issue_date': invoice.issue_date.isoformat() if invoice.issue_date else None,
+                'payment_status': invoice.payment_status,
+                'linked_via_related_order': invoice.related_order_id == order.id,
+                'linked_via_related_orders': linked_via_related_orders,
+                'related_orders': related_orders_data,
+                'invoice_file_url': invoice_file_url,
+                'partner': {
+                    'id': invoice.partner_id,
+                    'name': invoice.partner.name if invoice.partner else 'Nenurodyta',
+                } if invoice.partner_id else None,
+            })
+
+        return Response({
+            'has_related_invoices': bool(sales_data or purchase_data),
+            'sales_invoices_count': len(sales_data),
+            'purchase_invoices_count': len(purchase_data),
+            'sales_invoices': sales_data,
+            'purchase_invoices': purchase_data,
+        })
+    
+    @action(detail=False, methods=['get'], url_path='available-for-invoice')
+    def available_for_invoice(self, request):
+        """Grąžina kliento neužfaktuotus užsakymus sąskaitos formavimui"""
+        from apps.invoices.models import SalesInvoiceOrder
+
+        partner_id = request.query_params.get('partner_id')
+        invoice_id = request.query_params.get('invoice_id')
+
+        try:
+            partner_id_int = int(partner_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'partner_id privalomas'}, status=status.HTTP_400_BAD_REQUEST)
+
+        invoice_id_int = None
+        if invoice_id:
+            try:
+                invoice_id_int = int(invoice_id)
+            except (TypeError, ValueError):
+                return Response({'error': 'Neteisingas invoice_id formatas'}, status=status.HTTP_400_BAD_REQUEST)
+
+        orders = Order.objects.filter(client_id=partner_id_int).prefetch_related(
+            'sales_invoices',
+            'order_sales_invoices__invoice',
+            'carriers'
+        ).order_by('-order_date', '-created_at')
+
+        results = []
+        for order in orders:
+            linked_invoice_ids = set()
+            # Gauti sąskaitas per ForeignKey (related_order)
+            try:
+                from apps.invoices.models import SalesInvoice
+                fk_invoices = SalesInvoice.objects.filter(related_order=order).values_list('id', flat=True)
+                linked_invoice_ids.update(fk_invoices)
+            except Exception:
+                pass
+            # Gauti sąskaitas per ManyToMany (SalesInvoiceOrder)
+            try:
+                m2m_invoices = SalesInvoiceOrder.objects.filter(order=order).values_list('invoice_id', flat=True)
+                linked_invoice_ids.update(m2m_invoices)
+            except Exception:
+                pass
+
+            if invoice_id_int is not None:
+                # Jei užsakymas jau yra susijęs su šia sąskaita per related_orders ManyToMany, įtraukti jį
+                is_related_to_this_invoice = invoice_id_int in linked_invoice_ids
+                remaining_ids = {inv_id for inv_id in linked_invoice_ids if inv_id != invoice_id_int}
+                # Įtraukti, jei nėra kitų sąskaitų ARBA jei jau susijęs su šia sąskaita
+                include = len(remaining_ids) == 0 or is_related_to_this_invoice
+            else:
+                include = len(linked_invoice_ids) == 0
+
+            if not include:
+                continue
+
+            calculated_net = order.calculated_client_price_net
+            if order.client_price_net is not None:
+                amount_val = Decimal(str(order.client_price_net))
+            else:
+                amount_val = Decimal(str(calculated_net)) if calculated_net is not None else None
+
+            results.append({
+                'id': order.id,
+                'order_number': order.order_number or f'Užsakymas #{order.id}',
+                'client_price_net': str(order.client_price_net) if order.client_price_net is not None else None,
+                'calculated_client_price_net': str(calculated_net) if calculated_net is not None else None,
+                'suggested_amount_net': str(amount_val) if amount_val is not None else None,
+                'vat_rate': str(order.vat_rate) if order.vat_rate is not None else None,
+                'route_from': order.route_from,
+                'route_to': order.route_to,
+                'loading_date': order.loading_date.isoformat() if order.loading_date else None,
+                'unloading_date': order.unloading_date.isoformat() if order.unloading_date else None,
+            })
+
+        return Response({'results': results})
+    
+    def destroy(self, request, *args, **kwargs):
+        """Ištrinti užsakymą su galimybe kontroliuoti susijusių sąskaitų trinimą"""
+        from apps.invoices.models import SalesInvoice, PurchaseInvoice, SalesInvoiceOrder
+        
+        instance = self.get_object()
+        
+        # Patikrinti ar reikia ištrinti sąskaitas
+        # DELETE request gali turėti body arba parametrus query string'e
+        delete_invoices = False
+        if hasattr(request, 'data') and request.data:
+            delete_invoices = request.data.get('delete_invoices', 'false').lower() == 'true'
+        elif 'delete_invoices' in request.query_params:
+            delete_invoices = request.query_params.get('delete_invoices', 'false').lower() == 'true'
+        
+        if delete_invoices:
+            # Ištrinti visas susijusias sąskaitas
+            sales_invoice_ids = set(SalesInvoice.objects.filter(related_order=instance).values_list('id', flat=True))
+            sales_invoice_ids.update(SalesInvoiceOrder.objects.filter(order=instance).values_list('invoice_id', flat=True))
+            if sales_invoice_ids:
+                SalesInvoice.objects.filter(id__in=sales_invoice_ids).delete()
+            purchase_ids = list(PurchaseInvoice.objects.filter(
+                Q(related_order=instance) | Q(related_orders=instance)
+            ).values_list('id', flat=True))
+            if purchase_ids:
+                PurchaseInvoice.objects.filter(id__in=purchase_ids).delete()
+        else:
+            # Nuimti sąsajas, bet sąskaitų netrinti
+            SalesInvoice.objects.filter(related_order=instance).update(related_order=None)
+            SalesInvoiceOrder.objects.filter(order=instance).delete()
+            PurchaseInvoice.objects.filter(related_order=instance).update(related_order=None)
+
+            # Pašalinti iš ManyToMany ryšių
+            m2m_purchase_invoices = PurchaseInvoice.objects.filter(related_orders=instance).prefetch_related('related_orders')
+            for purchase_invoice in m2m_purchase_invoices:
+                purchase_invoice.related_orders.remove(instance)
+        
+        # Pažymėti, kad užsakymas nebeturi išrašytų sąskaitų
+        instance.client_invoice_issued = False
+        instance.save(update_fields=['client_invoice_issued'])
+        
+        # Registruoti veiksmą ActivityLog prieš ištrynimą
+        try:
+            from apps.core.services.activity_log_service import ActivityLogService
+            ActivityLogService.log_order_deleted(instance, user=request.user, request=request)
+        except Exception as e:
+            logger.warning(f"Failed to log order deletion: {e}")
+        
+        # Ištrinti užsakymą
+        return super().destroy(request, *args, **kwargs)
+    
+    def get_queryset(self):
+        """Pritaikyti datų filtrus ir optimizuoti prefetch"""
+        # Užtikrinti DB ryšį
+        try:
+            connections['default'].ensure_connection()
+        except Exception as e:
+            logger.error(f"Database connection error in get_queryset: {e}")
+            try:
+                connections['default'].close()
+                connections['default'].ensure_connection()
+            except:
+                pass
+        
+        queryset = super().get_queryset()
+        
+        # Optimizuotas prefetch sales_invoices sąrašui (naudojamas get_first_sales_invoice ir get_sales_invoices_count)
+        from django.db.models import Prefetch
+        from apps.invoices.models import SalesInvoice
+        try:
+            queryset = queryset.prefetch_related(
+                Prefetch('sales_invoices', queryset=SalesInvoice.objects.only('id', 'invoice_number', 'invoice_type', 'amount_total', 'issue_date', 'due_date', 'related_order_id').order_by('id'))
+            )
+        except Exception as e:
+            logger.error(f"Error in prefetch_related: {e}")
+            # Jei prefetch nepavyko, grąžinti queryset be prefetch
+        
+        # Datų filtrai
+        query_params = getattr(self.request, 'query_params', {}) or {}
+        order_date_from = query_params.get('order_date__gte')
+        order_date_to = query_params.get('order_date__lte')
+        loading_date_from = query_params.get('loading_date__gte')
+        loading_date_to = query_params.get('loading_date__lte')
+        unloading_date_from = query_params.get('unloading_date__gte')
+        unloading_date_to = query_params.get('unloading_date__lte')
+        
+        if order_date_from:
+            queryset = queryset.filter(order_date__gte=order_date_from)
+        if order_date_to:
+            queryset = queryset.filter(order_date__lte=order_date_to)
+        if loading_date_from:
+            queryset = queryset.filter(loading_date__gte=loading_date_from)
+        if loading_date_to:
+            queryset = queryset.filter(loading_date__lte=loading_date_to)
+        if unloading_date_from:
+            queryset = queryset.filter(unloading_date__gte=unloading_date_from)
+        if unloading_date_to:
+            queryset = queryset.filter(unloading_date__lte=unloading_date_to)
+        
+        # Status filtrai (galimas kelis kartus)
+        status_list = query_params.get('status__in')
+        if status_list:
+            statuses = [s.strip() for s in status_list.split(',') if s.strip()]
+            if statuses:
+                # Specialus atvejis: jei filtruojama pagal 'waiting_for_docs', įtraukti ir užsakymus be gautų sąskaitų iš vežėjų
+                if 'waiting_for_docs' in statuses:
+                    # Užsakymai su status='waiting_for_docs' ARBA užsakymai, kuriuose yra vežėjai, bet nė vienam nėra gautos sąskaitos
+                    # Annotate: skaičiuoti vežėjų skaičių ir vežėjų su gauta sąskaita skaičių
+                    queryset = queryset.annotate(
+                        total_carriers=Count('carriers'),
+                        carriers_with_invoice=Count('carriers', filter=Q(carriers__invoice_received=True))
+                    ).filter(
+                        Q(status__in=statuses) | 
+                        Q(
+                            # Užsakymas turi vežėjų
+                            total_carriers__gt=0,
+                            # IR nė vienam vežėjui nėra gautos sąskaitos
+                            carriers_with_invoice=0
+                        )
+                    ).distinct()
+                else:
+                    queryset = queryset.filter(status__in=statuses)
+        
+        return queryset
+    
+    def perform_create(self, serializer):
+        """
+        Sukuria naują užsakymą su visais reikalingais susijusiais objektais.
+        Visas procesas vyksta vienoje atomiškai transakcijoje.
+        """
+        from apps.settings.models import OrderSettings
+        
+        # Užtikrinti duomenų bazės ryšį
+        try:
+            connections['default'].ensure_connection()
+        except Exception as e:
+            logger.error(f"Database connection error: {e}")
+            raise
+        
+        order_data = serializer.validated_data
+        
+        # Retry logika, jei kyla IntegrityError dėl dublikato order_number
+        # Retry turi būti UŽ transakcijos, kad kiekvienas bandymas būtų naujoje transakcijoje
+        max_retries = 3
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                # Viskas vienoje atomiškai transakcijoje
+                with transaction.atomic():
+                    # 1. Sukurti arba gauti City objektus
+                    if order_data.get('route_from'):
+                        route_from_name = order_data['route_from'].strip()
+                        if route_from_name:
+                            City.objects.get_or_create(name=route_from_name)
+                    
+                    if order_data.get('route_to'):
+                        route_to_name = order_data['route_to'].strip()
+                        if route_to_name:
+                            City.objects.get_or_create(name=route_to_name)
+                    
+                    # 2. Sukurti arba gauti VehicleType
+                    if order_data.get('vehicle_type'):
+                        vehicle_type_name = order_data['vehicle_type'].strip()
+                        if vehicle_type_name:
+                            VehicleType.objects.get_or_create(name=vehicle_type_name)
+                    
+                    # 3. Sukurti OtherCostType objektus (bulk)
+                    if order_data.get('other_costs'):
+                        descriptions = [
+                            cost['description'].strip()
+                            for cost in order_data['other_costs']
+                            if cost.get('description') and cost['description'].strip()
+                        ]
+                        if descriptions:
+                            existing = set(
+                                OtherCostType.objects.filter(description__in=descriptions)
+                                .values_list('description', flat=True)
+                            )
+                            to_create = [
+                                OtherCostType(description=desc)
+                                for desc in descriptions
+                                if desc not in existing
+                            ]
+                            if to_create:
+                                OtherCostType.objects.bulk_create(to_create, ignore_conflicts=True)
+                    
+                    # 4. Generuoti order_number (jei įjungta automatinė numeracija)
+                    # select_for_update() užrakina seką iki transakcijos commit
+                    try:
+                        order_settings = OrderSettings.load()
+                    except Exception:
+                        order_settings = None
+                    
+                    if order_settings and order_settings.auto_numbering:
+                        width = order_settings.order_number_width or 3
+                        order_number = generate_order_number(width=width)
+                        serializer.validated_data['order_number'] = order_number
+                    
+                    # 5. Patikrinti ekspedicijų numerius prieš užsakymo sukūrimą
+                    # Jei request turi carriers duomenis, patikrinti, ar nėra dubliuojančių numerių
+                    if hasattr(self.request, 'data') and 'carriers' in self.request.data:
+                        carriers_data = self.request.data.get('carriers', [])
+                        if isinstance(carriers_data, list):
+                            expedition_numbers = []
+                            for carrier_data in carriers_data:
+                                if isinstance(carrier_data, dict):
+                                    exp_num = carrier_data.get('expedition_number', '').strip().upper()
+                                    if exp_num:
+                                        expedition_numbers.append(exp_num)
+                            
+                            # Patikrinti, ar yra dubliuojančių numerių
+                            if len(expedition_numbers) != len(set(expedition_numbers)):
+                                raise serializers.ValidationError({
+                                    'carriers': 'Ekspedicijų numeriai negali dubliuotis.'
+                                })
+                            
+                            # Patikrinti, ar numeriai nėra jau naudojami
+                            from .models import OrderCarrier
+                            existing_numbers = OrderCarrier.objects.filter(
+                                expedition_number__in=expedition_numbers
+                            ).values_list('expedition_number', flat=True)
+                            if existing_numbers:
+                                raise serializers.ValidationError({
+                                    'carriers': f'Ekspedicijos numeriai jau naudojami: {", ".join(existing_numbers)}'
+                                })
+                    
+                    # 6. Išsaugoti užsakymą (su created_by)
+                    order = serializer.save(created_by=self.request.user)
+                    
+                    # 7. Registruoti veiksmą ActivityLog
+                    try:
+                        from apps.core.services.activity_log_service import ActivityLogService
+                        ActivityLogService.log_order_created(order, user=self.request.user, request=self.request)
+                    except Exception as e:
+                        logger.warning(f"Failed to log order creation: {e}")
+                
+                # Jei pavyko, išeiti iš retry ciklo
+                break
+                
+            except IntegrityError as e:
+                last_error = e
+                # Jei kyla IntegrityError dėl dublikato order_number, bandyti dar kartą
+                error_str = str(e)
+                if 'order_number' in error_str or 'Duplicate entry' in error_str:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Duplicate order_number detected, retrying (attempt {attempt + 1}/{max_retries}): {e}")
+                        # Išvalyti order_number iš validated_data, kad būtų sugeneruotas naujas
+                        serializer.validated_data.pop('order_number', None)
+                        # Užtikrinti, kad duomenų bazės ryšys yra atnaujintas
+                        try:
+                            connections['default'].close()
+                        except:
+                            pass
+                        # Trumpas laukimas prieš bandant dar kartą (milisekundės)
+                        import time
+                        time.sleep(0.05 * (attempt + 1))  # 50ms, 100ms, 150ms
+                        # Tęsti ciklą, kad būtų sugeneruotas naujas numeris naujoje transakcijoje
+                        continue
+                    else:
+                        # Jei visi bandymai nepavyko, pakelti klaidą
+                        logger.error(f"Error creating order after {max_retries} attempts due to duplicate order_number: {e}", exc_info=True)
+                        try:
+                            connections['default'].close()
+                        except:
+                            pass
+                        raise
+                else:
+                    # Jei klaida ne dėl order_number, pakelti klaidą
+                    logger.error(f"Error creating order after {attempt + 1} attempts: {e}", exc_info=True)
+                    try:
+                        connections['default'].close()
+                    except:
+                        pass
+                    raise
+            except Exception as e:
+                logger.error(f"Error creating order: {e}", exc_info=True)
+                try:
+                    connections['default'].close()
+                except:
+                    pass
+                raise
+        
+        # Jei visi bandymai nepavyko, pakelti paskutinę klaidą
+        if last_error and 'order_number' in str(last_error):
+            logger.error(f"Failed to create order after {max_retries} attempts due to duplicate order_number")
+            raise last_error
+    
+    def perform_update(self, serializer):
+        """Atnaujinti užsakymą ir automatiškai sukurti miestus/mašinos tipus, jei reikia"""
+        # Užtikrinti, kad duomenų bazės ryšys yra atviras
+        try:
+            connections['default'].ensure_connection()
+        except Exception as e:
+            logger.error(f"Database connection error in perform_update: {e}")
+            raise
+        
+        # Optimizuota: naudoja bulk operations, kad išvengtų multiple queries
+        order_data = serializer.validated_data
+        
+        # Užkrauti originalų užsakymą prieš pakeitimus (su visais related objects)
+        instance = serializer.instance
+        old_order = Order.objects.select_related('client', 'manager').prefetch_related(
+            'cargo_items', 'carriers__partner'
+        ).get(pk=instance.pk)
+        
+        # Naudoti atomic transakciją, kad išvengtume InterfaceError
+        # Taip pat užtikrinti connection recovery
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                with transaction.atomic():
+                    # Sukurti arba gauti miestą "iš"
+                    if order_data.get('route_from'):
+                        route_from_name = order_data['route_from'].strip()
+                        if route_from_name:
+                            City.objects.get_or_create(name=route_from_name, defaults={'name': route_from_name})
+                    
+                    # Sukurti arba gauti miestą "į"
+                    if order_data.get('route_to'):
+                        route_to_name = order_data['route_to'].strip()
+                        if route_to_name:
+                            City.objects.get_or_create(name=route_to_name, defaults={'name': route_to_name})
+                    
+                    # Sukurti arba gauti mašinos tipą
+                    if order_data.get('vehicle_type'):
+                        vehicle_type_name = order_data['vehicle_type'].strip()
+                        if vehicle_type_name:
+                            VehicleType.objects.get_or_create(name=vehicle_type_name, defaults={'name': vehicle_type_name})
+                    
+                    # Optimizuotas: bulk create išlaidų tipus
+                    if order_data.get('other_costs'):
+                        descriptions = [
+                            cost['description'].strip() 
+                            for cost in order_data['other_costs'] 
+                            if cost.get('description') and cost['description'].strip()
+                        ]
+                        if descriptions:
+                            # Užkrauti esamas vieną kartą
+                            existing_descriptions = set(
+                                OtherCostType.objects.filter(description__in=descriptions).values_list('description', flat=True)
+                            )
+                            # Sukurti tik naujas
+                            to_create = [
+                                OtherCostType(description=desc)
+                                for desc in descriptions
+                                if desc not in existing_descriptions
+                            ]
+                            if to_create:
+                                OtherCostType.objects.bulk_create(to_create, ignore_conflicts=True)
+                    
+                    # Išsaugoti užsakymą transakcijos viduje
+                    new_order = serializer.save()
+                    
+                    # Atnaujinti užkrauti related objects po išsaugojimo
+                    new_order.refresh_from_db()
+                    # Užkrauti cargo_items ir carriers iš naujo (naudojama tolimesniems veiksmams)
+                    new_order = Order.objects.select_related('client', 'manager').prefetch_related(
+                        'cargo_items', 'carriers__partner'
+                    ).get(pk=new_order.pk)
+                    
+                    # Registruoti veiksmus ActivityLog (po transakcijos, kad išvengtume problemų)
+                    try:
+                        from apps.core.services.activity_log_service import ActivityLogService
+
+                        # Svarbūs laukai, kurių pakeitimus reikia sekti
+                        important_fields = [
+                            'client_price_net', 'my_price_net', 'route_from', 'route_to',
+                            'loading_date', 'unloading_date', 'description', 'notes',
+                            'vehicle_type', 'status'
+                        ]
+
+                        # Sekti kiekvieno lauko pakeitimą atskirai
+                        field_changes_logged = False
+                        for field_name in important_fields:
+                            old_value = getattr(old_order, field_name, None)
+                            new_value = getattr(new_order, field_name, None)
+
+                            # Tikrinti ar reikšmės skiriasi (įskaitant None atvejus)
+                            if old_value != new_value:
+                                try:
+                                    ActivityLogService.log_order_field_updated(
+                                        new_order, field_name, old_value, new_value,
+                                        user=getattr(self.request, 'user', None), request=self.request
+                                    )
+                                    field_changes_logged = True
+                                except Exception as log_error:
+                                    # Jei nepavyksta užfiksuoti konkretaus lauko pakeitimo, tęsti
+                                    logger.warning(f"Failed to log field change for {field_name}: {log_error}")
+
+                        # Jei buvo konkrečių laukų pakeitimų, nepridėti bendro "atnaujintas" įrašo
+                        # Jei nebuvo laukų pakeitimų (pvz., tik related objektai), pridėti bendrą įrašą
+                        if not field_changes_logged:
+                            try:
+                                changes = {}
+                                if old_order.status != new_order.status:
+                                    changes['status'] = {'old': old_order.status, 'new': new_order.status}
+                                ActivityLogService.log_order_updated(new_order, user=getattr(self.request, 'user', None), request=self.request, changes=changes)
+                            except Exception as log_error:
+                                logger.warning(f"Failed to log general order update: {log_error}")
+
+                    except Exception as e:
+                        logger.warning(f"Failed to log order update: {e}")
+
+                    # Jei sėkmė, išeiti iš retry loop
+                    break
+            except Exception as e:
+                error_type = type(e).__name__
+                logger.error(f"Error in perform_update (attempt {attempt + 1}/{max_retries}): {error_type}: {e}", exc_info=True)
+                
+                # Jei InterfaceError arba connection problema - bandyti recovery
+                if 'InterfaceError' in error_type or 'OperationalError' in error_type or attempt < max_retries - 1:
+                    try:
+                        # Uždarome ir atidarome ryšį
+                        connections['default'].close()
+                        connections['default'].ensure_connection()
+                        logger.info(f"Connection recovered, retrying... (attempt {attempt + 1}/{max_retries})")
+                        if attempt < max_retries - 1:
+                            continue  # Bandyti dar kartą
+                    except Exception as recovery_error:
+                        logger.error(f"Connection recovery failed: {recovery_error}")
+                
+                # Jei visi bandymai nepavyko arba klaida ne InterfaceError - mesti klaidą
+                if attempt == max_retries - 1:
+                    raise
+    
+    @action(detail=True, methods=['post'])
+    def change_status(self, request, pk=None):
+        """Užsakymo statuso keitimo endpoint - naudoja StatusService"""
+        try:
+            connections['default'].ensure_connection()
+        except Exception as e:
+            logger.error(f"Database connection error in change_status: {e}")
+            try:
+                connections['default'].close()
+                connections['default'].ensure_connection()
+            except:
+                pass
+        
+        order = self.get_object()
+        serializer = OrderStatusChangeSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            new_status = serializer.validated_data['new_status']
+            reason = serializer.validated_data.get('reason', '')
+            
+            try:
+                # Naudoti StatusService
+                from apps.core.services.status_service import StatusService
+                result = StatusService.change_status(
+                    entity_type='order',
+                    entity_id=order.id,
+                    new_status=new_status,
+                    user=request.user,
+                    reason=reason,
+                    request=request
+                )
+                
+                # Atnaujinti order objektą
+                order.refresh_from_db()
+                
+                return Response({
+                    'success': True,
+                    'order': OrderSerializer(order).data,
+                    'message': result['message']
+                })
+            except ValueError as e:
+                # StatusService validacijos klaida
+                return Response(
+                    {"error": str(e)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            except Exception as e:
+                logger.error(f"Error in change_status: {e}", exc_info=True)
+                try:
+                    connections['default'].close()
+                except:
+                    pass
+                return Response(
+                    {"error": f"Klaida keičiant statusą: {str(e)}"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Override retrieve to add connection handling"""
+        try:
+            connections['default'].ensure_connection()
+        except Exception as e:
+            logger.error(f"Database connection error in retrieve: {e}")
+            try:
+                connections['default'].close()
+                connections['default'].ensure_connection()
+            except:
+                pass
+        
+        return super().retrieve(request, *args, **kwargs)
+    
+    def _prepare_order_context(self, order, request, lang=None):
+        """Paruošti kontekstą užsakymo HTML/PDF generavimui"""
+        from apps.settings.models import CompanyInfo, OrderSettings
+        from apps.invoices.utils import amount_to_words
+        
+        # Gauti kalbą iš parametro arba užklausos arba numatytąją
+        if not lang:
+            lang = request.GET.get('lang', request.data.get('lang', 'lt')).lower()
+        if lang not in ['lt', 'en', 'ru']:
+            lang = 'lt'
+        
+        # Užkrauti užsakymą su visais susijusiais objektais
+        order = Order.objects.select_related('client', 'manager', 'created_by', 'manager__user_settings').prefetch_related(
+            'carriers__partner', 
+            'cargo_items', 
+            'route_stops',
+            'route_stops__loading_cargo_items',
+            'route_stops__unloading_cargo_items'
+        ).get(pk=order.pk)
+        
+        # Įmonės informacija - saugiai užkrauti
+        try:
+            company = CompanyInfo.load()
+        except Exception as e:
+            logger.warning(f"Nepavyko užkrauti CompanyInfo: {e}")
+            company = None
+        
+        # Užsakymų nustatymai - užkrauti
+        try:
+            order_settings = OrderSettings.load()
+        except Exception as e:
+            logger.warning(f"Nepavyko užkrauti OrderSettings: {e}")
+            order_settings = None
+        
+        # Konvertuoti PVM tarifą į skaičių
+        vat_rate = float(order.vat_rate) if order.vat_rate else 21.0
+        
+        # Apskaičiuoti kainas su PVM
+        price_net = float(order.client_price_net) if order.client_price_net else float(order.price_net or 0)
+        vat_amount = price_net * (vat_rate / 100)
+        price_with_vat = price_net + vat_amount
+        
+        # Apskaičiuoti papildomas išlaidas
+        other_costs_list = []
+        other_costs_total = Decimal('0.00')
+        if hasattr(order, 'other_costs') and order.other_costs:
+            if isinstance(order.other_costs, list):
+                for cost in order.other_costs:
+                    if isinstance(cost, dict) and 'description' in cost and 'amount' in cost:
+                        try:
+                            amount = Decimal(str(cost['amount']))
+                            other_costs_list.append({
+                                'description': cost['description'],
+                                'amount': amount
+                            })
+                            other_costs_total += amount
+                        except (ValueError, TypeError):
+                            pass
+        
+        # Apskaičiuoti transporto/sandėlio išlaidas
+        transport_warehouse_cost = Decimal('0.00')
+        if hasattr(order, 'transport_warehouse_cost') and order.transport_warehouse_cost:
+            try:
+                transport_warehouse_cost = Decimal(str(order.transport_warehouse_cost))
+            except (ValueError, TypeError):
+                pass
+        
+        # Apskaičiuoti sumą žodžiais - iš galutinės kainos SU PVM
+        if price_with_vat > 0:
+            amount_in_words = amount_to_words(Decimal(str(price_with_vat)), lang=lang)
+        else:
+            if lang == 'en':
+                amount_in_words = "zero EUR"
+            elif lang == 'ru':
+                amount_in_words = "ноль EUR"
+            else:
+                amount_in_words = "nulis EUR"
+        
+        # Gauti vat_rate_article iš užsakymo
+        vat_rate_article = order.vat_rate_article if order.vat_rate_article else ''
+        
+        # Bandyti išversti vat_rate_article, jei tai standartinis straipsnis
+        if vat_rate_article and lang != 'lt':
+            from apps.settings.models import PVMRate
+            try:
+                # Bandome rasti atitinkamą tarifą pagal LT tekstą
+                rate_obj = PVMRate.objects.filter(article=vat_rate_article).first()
+                if rate_obj:
+                    if lang == 'en' and rate_obj.article_en:
+                        vat_rate_article = rate_obj.article_en
+                    elif lang == 'ru' and rate_obj.article_ru:
+                        vat_rate_article = rate_obj.article_ru
+            except Exception:
+                pass
+        
+        # Paruošti vertimus šablonui
+        labels = get_contract_labels(lang) # Galima naudoti tuos pačius label'ius, nes struktūra panaši
+
+        # Paruošti krovinių informaciją (svorio konvertavimas ir t.t.)
+        for cargo in order.cargo_items.all():
+            # Išversti aprašymą, jei tai numatytasis "Krovinys"
+            orig_desc = (cargo.description or "").strip().lower()
+            if orig_desc in ["krovinys", "cargo", "груз", ""]:
+                cargo.description_display = labels.get('cargo_default', 'Krovinys')
+            else:
+                cargo.description_display = cargo.description
+
+            if cargo.weight_kg:
+                if cargo.weight_kg >= 1000:
+                    weight_val = float(cargo.weight_kg) / 1000
+                    unit = labels.get('t', 't.')
+                    cargo.weight_display = f"{weight_val:.2f} {unit}"
+                else:
+                    unit = labels.get('kg', 'kg.')
+                    cargo.weight_display = f"{float(cargo.weight_kg):.0f} {unit}"
+            else:
+                cargo.weight_display = ""
+
+            # Išversti specialiuosius reikalavimus
+            specs = []
+            if cargo.requires_forklift: specs.append(labels.get('forklift', 'Keltuvas'))
+            if cargo.requires_crane: specs.append(labels.get('crane', 'Kranas'))
+            if cargo.requires_special_equipment: specs.append(labels.get('special_equipment', 'Speciali įranga'))
+            if cargo.fragile: specs.append(labels.get('fragile_label', 'Trapus'))
+            if cargo.hazardous: specs.append(labels.get('hazardous_label', 'Pavojingas'))
+            if cargo.temperature_controlled: specs.append(labels.get('temp_control', 'Temperatūros kontrolė'))
+            if cargo.requires_permit: specs.append(labels.get('permit', 'Reikalingas leidimas'))
+            cargo.special_requirements_display = ", ".join(specs) if specs else ""
+
+            # Išversti vienetus
+            if cargo.units:
+                unit_label = labels.get('pieces', 'vnt.')
+                cargo.units_display = f"{cargo.units} {unit_label}"
+            else:
+                cargo.units_display = ""
+
+            # Išversti tipą
+            if cargo.is_palletized:
+                cargo.type_display = labels.get('pallet_cargo', 'Paletinis krovinys')
+            else:
+                cargo.type_display = labels.get('partial_cargo', 'Dalinis krovinys')
+        
+        # Pakeisti standartinius tekstus iš nustatymų, jei yra vertimai
+        if order_settings:
+            if lang == 'en' and order_settings.payment_terms_en:
+                labels['default_payment_terms'] = order_settings.payment_terms_en
+            elif lang == 'ru' and order_settings.payment_terms_ru:
+                labels['default_payment_terms'] = order_settings.payment_terms_ru
+            elif lang == 'lt' and order_settings.payment_terms:
+                labels['default_payment_terms'] = order_settings.payment_terms
+                
+            # Pereiti per pareigas ir parinkti teisingą kalbą
+            if order_settings.carrier_obligations:
+                custom_carrier_obs = []
+                for item in order_settings.carrier_obligations:
+                    text = item.get('text', '')
+                    if lang == 'en' and item.get('text_en'):
+                        text = item.get('text_en')
+                    elif lang == 'ru' and item.get('text_ru'):
+                        text = item.get('text_ru')
+                    if text:
+                        custom_carrier_obs.append(text)
+                if custom_carrier_obs:
+                    labels['default_carrier_obligations'] = custom_carrier_obs
+                    
+            if order_settings.client_obligations:
+                custom_client_obs = []
+                for item in order_settings.client_obligations:
+                    text = item.get('text', '')
+                    if lang == 'en' and item.get('text_en'):
+                        text = item.get('text_en')
+                    elif lang == 'ru' and item.get('text_ru'):
+                        text = item.get('text_ru')
+                    if text:
+                        custom_client_obs.append(text)
+                if custom_client_obs:
+                    labels['default_customer_obligations'] = custom_client_obs
+
+        return {
+            'order': order,
+            'company': company,
+            'order_settings': order_settings,
+            'amount_in_words': amount_in_words,
+            'vat_rate': vat_rate,
+            'vat_rate_article': vat_rate_article,
+            'price_net': price_net,
+            'vat_amount': vat_amount,
+            'price_with_vat': price_with_vat,
+            'other_costs': other_costs_list,
+            'other_costs_total': float(other_costs_total),
+            'transport_warehouse_cost': float(transport_warehouse_cost),
+            'labels': labels,
+            'lang': lang,
+        }
+    
+    @action(detail=True, methods=['get'])
+    def preview(self, request, pk=None):
+        """Grąžina HTML užsakymo sutarties peržiūrą"""
+        try:
+            order = self.get_object()
+            context = self._prepare_order_context(order, request)
+            return render(request, 'orders/order_contract.html', context)
+        except Exception as e:
+            logger.error(f"Klaida generuojant preview: {e}", exc_info=True)
+            return HttpResponse(f"<html><body><h1>Klaida</h1><p>{str(e)}</p></body></html>", status=500)
+    
+    @action(detail=True, methods=['get'])
+    def pdf(self, request, pk=None):
+        """Grąžina PDF užsakymo sutarties versiją - naudoja tą patį metodą kaip send_email"""
+        order = self.get_object()
+        context = self._prepare_order_context(order, request)
+        
+        # Generuoti HTML su visais duomenimis
+        html_string = render(request, 'orders/order_contract.html', context).content.decode('utf-8')
+        
+        # Tik minimalus valymas - pašalinti tik script tag'us ir action buttons HTML
+        import re
+        html_string = re.sub(r'<div[^>]*class=["\'][^"\']*action-buttons[^"\']*["\'][^>]*>.*?</div>\s*', '', html_string, flags=re.DOTALL)
+        html_string = re.sub(r'<script[^>]*>.*?</script>', '', html_string, flags=re.DOTALL | re.IGNORECASE)
+        
+        pdf_bytes = None
+        
+        # Bandyti naudoti WeasyPrint (geresnė kokybė) - tą patį kaip send_email
+        try:
+            from weasyprint import HTML, CSS
+            base_url = request.build_absolute_uri('/')
+            html_doc = HTML(string=html_string, base_url=base_url)
+            
+            pdf_css_string = """
+                @page {
+                    size: A4;
+                    margin: 0;
+                }
+            """
+            css_doc = CSS(string=pdf_css_string)
+            
+            pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
+            logger.info("WeasyPrint sėkmingai sugeneravo PDF atsisiuntimui")
+            
+        except (ImportError, OSError) as e:
+            logger.warning(f"WeasyPrint nepasiekiamas: {e}, naudojamas xhtml2pdf fallback")
+        except Exception as e:
+            logger.error(f"WeasyPrint klaida: {e}, naudojamas xhtml2pdf fallback")
+        
+        # Fallback į xhtml2pdf - tą patį kaip send_email
+        if not pdf_bytes:
+            try:
+                from io import BytesIO
+                from xhtml2pdf import pisa
+                
+                result = BytesIO()
+                
+                def link_callback(uri, rel):
+                    from urllib.parse import urlparse, urljoin
+                    from django.conf import settings
+                    import os
+                    
+                    if uri.startswith('data:'):
+                        return uri
+                    
+                    if uri.startswith('/'):
+                        if uri.startswith(settings.MEDIA_URL):
+                            file_path = uri.replace(settings.MEDIA_URL, '')
+                            full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+                            if os.path.exists(full_path):
+                                return f"file://{full_path}"
+                        base_url = request.build_absolute_uri('/').rstrip('/')
+                        return urljoin(base_url, uri)
+                    
+                    return uri
+                
+                pdf = pisa.pisaDocument(
+                    BytesIO(html_string.encode("UTF-8")), 
+                    result,
+                    encoding='UTF-8',
+                    link_callback=link_callback,
+                    show_error_as_pdf=False
+                )
+                
+                if pdf.err:
+                    error_msg = str(pdf.err) if pdf.err else "Nežinoma PDF generavimo klaida"
+                    logger.error(f"xhtml2pdf klaida: {error_msg}")
+                    return HttpResponse(f"Klaida generuojant PDF: {error_msg}", status=500)
+                    
+                pdf_bytes = result.getvalue()
+                
+                # Patikrinti, ar tikrai PDF (prasideda su %PDF)
+                if not pdf_bytes or not pdf_bytes.startswith(b'%PDF'):
+                    error_msg = "Generuotas failas nėra PDF formatas"
+                    logger.error(f"xhtml2pdf klaida: {error_msg}")
+                    if pdf_bytes:
+                        logger.error(f"Grąžintas turinys (pirmi 500 simbolių): {pdf_bytes[:500]}")
+                    return HttpResponse(f"Klaida generuojant PDF: {error_msg}", status=500)
+            except ImportError:
+                logger.error("xhtml2pdf nepasiekiamas")
+                return HttpResponse("PDF generavimo biblioteka nepasiekiama. Prašome įdiegti WeasyPrint arba xhtml2pdf.", status=500)
+        
+        if not pdf_bytes:
+            return HttpResponse("Nepavyko generuoti PDF", status=500)
+        
+        response = HttpResponse(pdf_bytes, content_type='application/pdf')
+        response['Content-Disposition'] = f'inline; filename="{order.order_number or "uzsakymas"}.pdf"'
+        return response
+
+    @action(detail=True, methods=['post'])
+    def send_email(self, request, pk=None):
+        """Siunčia užsakymo PDF el. paštu"""
+        order = self.get_object()
+        
+        # Priimti masyvą email'ų arba vieną email (atgalinis suderinamumas)
+        emails = request.data.get('emails', [])
+        if not emails:
+            # Jei nėra masyvo, bandyti gauti vieną email
+            email = request.data.get('email', '').strip()
+            if email:
+                emails = [email]
+        
+        if not emails:
+            return Response(
+                {'success': False, 'error': 'Nenurodytas el. pašto adresas'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Pridėti naujus kontaktus, jei yra
+        contacts_to_add = request.data.get('contacts_to_add', [])
+        if contacts_to_add and order.client:
+            from apps.partners.models import Contact
+            for contact_data in contacts_to_add:
+                email_addr = contact_data.get('email', '').strip()
+                if email_addr:
+                    # Patikrinti, ar kontaktas jau egzistuoja
+                    if not Contact.objects.filter(partner=order.client, email__iexact=email_addr).exists():
+                        Contact.objects.create(
+                            partner=order.client,
+                            email=email_addr,
+                            first_name=contact_data.get('first_name', '').strip() or '',
+                            last_name=contact_data.get('last_name', '').strip() or ''
+                        )
+        
+        try:
+            # Generuoti PDF - naudoti TIKSLIAI tą patį metodą kaip pdf() endpoint'as
+            context = self._prepare_order_context(order, request)
+            html_string = render(request, 'orders/order_contract.html', context).content.decode('utf-8')
+            
+            # Tik minimalus valymas - pašalinti tik script tag'us ir action buttons HTML
+            import re
+            html_string = re.sub(r'<div[^>]*class=["\'][^"\']*action-buttons[^"\']*["\'][^>]*>.*?</div>\s*', '', html_string, flags=re.DOTALL)
+            html_string = re.sub(r'<script[^>]*>.*?</script>', '', html_string, flags=re.DOTALL | re.IGNORECASE)
+            
+            pdf_bytes = None
+            
+            # Bandyti naudoti WeasyPrint (geresnė kokybė)
+            try:
+                from weasyprint import HTML, CSS
+                base_url = request.build_absolute_uri('/')
+                html_doc = HTML(string=html_string, base_url=base_url)
+                
+                pdf_css_string = """
+                    @page {
+                        size: A4;
+                        margin: 0;
+                    }
+                """
+                css_doc = CSS(string=pdf_css_string)
+                
+                pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
+                logger.info("WeasyPrint sėkmingai sugeneravo PDF el. laiške")
+                
+            except (ImportError, OSError) as e:
+                logger.warning(f"WeasyPrint nepasiekiamas el. laiške: {e}, naudojamas xhtml2pdf fallback")
+            except Exception as e:
+                logger.error(f"WeasyPrint klaida el. laiške: {e}, naudojamas xhtml2pdf fallback")
+            
+            # Fallback į xhtml2pdf
+            if not pdf_bytes:
+                try:
+                    from io import BytesIO
+                    from xhtml2pdf import pisa
+                    
+                    result = BytesIO()
+                    
+                    def link_callback(uri, rel):
+                        from urllib.parse import urlparse, urljoin
+                        from django.conf import settings
+                        import os
+                        
+                        if uri.startswith('data:'):
+                            return uri
+                        
+                        if uri.startswith('/'):
+                            if uri.startswith(settings.MEDIA_URL):
+                                file_path = uri.replace(settings.MEDIA_URL, '')
+                                full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+                                if os.path.exists(full_path):
+                                    return f"file://{full_path}"
+                            base_url = request.build_absolute_uri('/').rstrip('/')
+                            return urljoin(base_url, uri)
+                        
+                        return uri
+                    
+                    pdf = pisa.pisaDocument(
+                        BytesIO(html_string.encode("UTF-8")), 
+                        result,
+                        encoding='UTF-8',
+                        link_callback=link_callback,
+                        show_error_as_pdf=False
+                    )
+                    
+                    if pdf.err:
+                        error_msg = str(pdf.err) if pdf.err else "Nežinoma PDF generavimo klaida"
+                        logger.error(f"xhtml2pdf klaida el. laiške: {error_msg}")
+                        return Response(
+                            {'success': False, 'error': f'PDF generavimo klaida: {error_msg}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        )
+                    
+                    pdf_bytes = result.getvalue()
+                    
+                    # Patikrinti, ar tikrai PDF (prasideda su %PDF)
+                    if not pdf_bytes or not pdf_bytes.startswith(b'%PDF'):
+                        error_msg = "Generuotas failas nėra PDF formatas"
+                        logger.error(f"xhtml2pdf klaida el. laiške: {error_msg}")
+                        if pdf_bytes:
+                            logger.error(f"Grąžintas turinys (pirmi 500 simbolių): {pdf_bytes[:500]}")
+                        return Response(
+                            {'success': False, 'error': f'PDF generavimo klaida: {error_msg}'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                        )
+                    
+                except ImportError:
+                    logger.error("xhtml2pdf nepasiekiamas el. laiške")
+                    return Response(
+                        {'success': False, 'error': 'PDF generavimo biblioteka nepasiekiama'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+            
+            if not pdf_bytes:
+                return Response(
+                    {'success': False, 'error': 'Nepavyko generuoti PDF'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            # Naudoti NotificationSettings nustatymus (taip pat kaip send_test_email)
+            from apps.settings.models import NotificationSettings
+            config = NotificationSettings.load()
+            
+            if not config.smtp_enabled:
+                return Response(
+                    {'success': False, 'error': 'SMTP siuntimas nėra įjungtas. Įjunkite „Įjungti el. laiškų siuntimą" ir išsaugokite nustatymus.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            missing_fields = []
+            if not config.smtp_host:
+                missing_fields.append('SMTP serveris')
+            if not config.smtp_port:
+                missing_fields.append('SMTP portas')
+            if not config.smtp_username:
+                missing_fields.append('SMTP naudotojas')
+            if not config.smtp_password:
+                missing_fields.append('SMTP slaptažodis')
+            if not config.smtp_from_email:
+                missing_fields.append('Numatytasis siuntėjas (el. paštas)')
+            
+            if missing_fields:
+                return Response(
+                    {'success': False, 'error': 'Nepakanka SMTP nustatymų. Trūksta laukų: ' + ', '.join(missing_fields)},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Formuoti from_email su vardu, jei yra
+            from_email = f"{config.smtp_from_name or 'TMS Sistema'} <{config.smtp_from_email}>"
+            
+            # Sukurti SMTP connection su NotificationSettings nustatymais (taip pat kaip send_test_email)
+            use_tls = bool(config.smtp_use_tls)
+            use_ssl = False
+            if not use_tls and config.smtp_port in (465, 587):
+                # Jei TLS nepanaudojamas, o portas atitinka SSL – bandome su SSL
+                use_ssl = config.smtp_port == 465
+            
+            # Siųsti el. laišką naudojant šabloną
+            # Paruošti context su order duomenimis
+            context = {
+                'order_number': order.order_number or 'N/A',
+                'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else 'N/A',
+                'partner_name': order.client.name if order.client else '',
+                'partner_code': order.client.code if order.client and hasattr(order.client, 'code') else '',
+                'partner_vat_code': order.client.vat_code if order.client and hasattr(order.client, 'vat_code') else '',
+                'route_from': order.route_from or '',
+                'route_to': order.route_to or '',
+                'loading_date': order.loading_date.strftime('%Y-%m-%d') if order.loading_date else '',
+                'unloading_date': order.unloading_date.strftime('%Y-%m-%d') if order.unloading_date else '',
+                'price_net': str(order.price_net) if order.price_net else '0',
+                'price_with_vat': str(order.price_net * (1 + Decimal(order.vat_rate or 0) / 100)) if order.price_net and order.vat_rate else '0',
+            }
+            
+            # Pridėti vadybininko informaciją jei yra
+            if order.manager:
+                context['manager_name'] = f"{order.manager.first_name or ''} {order.manager.last_name or ''}".strip() or order.manager.username
+            
+            # Gauti kalbą iš užklausos duomenų
+            lang = request.data.get('lang', 'lt')
+            
+            # Renderinti šabloną
+            email_content = render_email_template(
+                template_type='order_to_client',
+                context=context,
+                is_auto_generated=True,
+                lang=lang
+            )
+            
+            subject = email_content['subject']
+            message = email_content['body_text']
+            
+            try:
+                # Log'uoti nustatymus (be slaptažodžio)
+                logger.info(f"Siunčiamas el. laiškas su SMTP nustatymais: host={config.smtp_host}, port={config.smtp_port}, use_tls={use_tls}, use_ssl={use_ssl}, from={from_email}, to={emails}")
+                
+                connection = get_connection(
+                    backend='django.core.mail.backends.smtp.EmailBackend',
+                    host=config.smtp_host,
+                    port=config.smtp_port,
+                    username=config.smtp_username,
+                    password=config.smtp_password,
+                    use_tls=use_tls,
+                    use_ssl=use_ssl,
+                    timeout=10,
+                )
+                
+                # Sukurti failo vardą su užsakymo numeriu
+                order_number = order.order_number or f"uzsakymas_{order.id}"
+                filename = f"uzsakymas_{order_number}.pdf"
+                
+                # Siųsti visiems email'ams
+                sent_count = 0
+                failed_emails = []
+                
+                for email in emails:
+                    email = email.strip()
+                    if not email:
+                        continue
+                    
+                    try:
+                        email_msg = EmailMessage(
+                            subject=subject,
+                            body=message,
+                            from_email=from_email,
+                            to=[email],
+                            connection=connection,
+                        )
+                        email_msg.attach(filename, pdf_bytes, 'application/pdf')
+                        
+                        # Siųsti su istorijos įrašymu
+                        try:
+                            result = send_email_message_with_logging(
+                                email_message=email_msg,
+                                email_type='order',
+                                related_order_id=order.id,
+                                related_partner_id=order.client.id if order.client else None,
+                                sent_by=request.user if hasattr(request, 'user') and request.user.is_authenticated else None,
+                                metadata={'recipient_name': order.client.name if order.client else ''}
+                            )
+                            # Jei grąžina rezultatą su success, patikrinti
+                            if isinstance(result, dict) and not result.get('success'):
+                                logger.error(f"Klaida siunčiant į {email}: {result.get('error', 'Nežinoma klaida')}")
+                                failed_emails.append(email)
+                            else:
+                                logger.info(f"Užsakymo el. laiškas sėkmingai išsiųstas į {email} (užsakymas {order.order_number})")
+                                sent_count += 1
+                        except Exception as email_error:
+                            logger.error(f"Klaida siunčiant į {email}: {email_error}")
+                            failed_emails.append(email)
+                    except Exception as e:
+                        logger.error(f"Klaida siunčiant į {email}: {e}")
+                        failed_emails.append(email)
+                
+                logger.info(f"El. laiškas sėkmingai išsiųstas į {sent_count} adresą/us (užsakymas {order.order_number})")
+                
+                if failed_emails:
+                    return Response({
+                        'success': True,
+                        'sent': sent_count > 0,
+                        'message': f'El. laiškas išsiųstas į {sent_count} adresą/us. Nepavyko siųsti į: {", ".join(failed_emails)}',
+                        'failed_emails': failed_emails
+                    })
+                else:
+                    return Response({
+                        'success': True,
+                        'sent': True,
+                        'message': f'El. laiškas sėkmingai išsiųstas į {sent_count} adresą/us'
+                    })
+                
+            except (SMTPException, OSError, socket.error) as exc:
+                logger.exception('Nepavyko išsiųsti el. laiško: %s', exc)
+                error_message = str(exc)
+                # Patobulinti klaidos žinutę
+                if 'authentication failed' in error_message.lower() or 'invalid credentials' in error_message.lower():
+                    error_message = 'SMTP autentifikacijos klaida. Patikrinkite SMTP naudotojo vardą ir slaptažodį.'
+                elif 'connection' in error_message.lower() or 'refused' in error_message.lower():
+                    error_message = 'Nepavyko prisijungti prie SMTP serverio. Patikrinkite SMTP serverio adresą ir portą.'
+                elif 'timeout' in error_message.lower():
+                    error_message = 'SMTP serverio prisijungimo laikas baigėsi. Patikrinkite tinklo ryšį ir SMTP nustatymus.'
+                
+                return Response(
+                    {'success': False, 'error': f'Klaida siunčiant el. laišką: {error_message}', 'sent': False},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+        except Exception as e:
+            logger.error(f"Klaida siunčiant el. laišką: {e}", exc_info=True)
+            error_message = str(e)
+            # Patobulinti klaidos žinutę
+            if 'authentication failed' in error_message.lower() or 'invalid credentials' in error_message.lower():
+                error_message = 'SMTP autentifikacijos klaida. Patikrinkite SMTP naudotojo vardą ir slaptažodį.'
+            elif 'connection' in error_message.lower() or 'refused' in error_message.lower():
+                error_message = 'Nepavyko prisijungti prie SMTP serverio. Patikrinkite SMTP serverio adresą ir portą.'
+            elif 'timeout' in error_message.lower():
+                error_message = 'SMTP serverio prisijungimo laikas baigėsi. Patikrinkite tinklo ryšį ir SMTP nustatymus.'
+            
+            return Response(
+                {'success': False, 'error': f'Klaida siunčiant el. laišką: {error_message}', 'sent': False},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['get'], url_path='mail-attachments')
+    def mail_attachments(self, request, pk=None):
+        order = self.get_object()
+
+        order_number = (order.order_number or '').strip().upper()
+        expedition_numbers = {
+            (carrier.expedition_number or '').strip().upper()
+            for carrier in order.carriers.all()
+            if getattr(carrier, 'expedition_number', None)
+        }
+        expedition_numbers.discard('')
+
+        if not order_number and not expedition_numbers:
+            return Response({
+                'has_matches': False,
+                'matched_type': None,
+                'matched_messages': [],
+                'attachment_files': [],
+            })
+
+        from apps.mail.models import MailMessage
+        from apps.mail.serializers import MailMessageSerializer
+
+        messages_queryset = MailMessage.objects.prefetch_related('attachments').all()
+
+        matched_messages = []
+        attachment_files = []
+        has_order_match = False
+        has_expedition_match = False
+
+        serializer = MailMessageSerializer(context={})
+
+        for message in messages_queryset:
+            matches = serializer.get_matches(message)
+            if not matches:
+                continue
+
+            matched_order = bool(order_number) and order_number in (matches.get('orders') or [])
+            matched_expedition = False
+            if expedition_numbers:
+                found_expeditions = matches.get('expeditions') or []
+                matched_expedition = any(num in expedition_numbers for num in found_expeditions)
+
+            if not matched_order and not matched_expedition:
+                continue
+
+            if matched_order:
+                has_order_match = True
+            if matched_expedition:
+                has_expedition_match = True
+
+            matched_messages.append({
+                'id': message.id,
+                'subject': message.subject,
+                'date': message.date.isoformat() if message.date else None,
+                'sender': message.sender,
+                'matched_order': matched_order,
+                'matched_expedition': matched_expedition,
+            })
+
+            for attachment in message.attachments.all():
+                attachment_files.append({
+                    'id': attachment.id,
+                    'filename': attachment.filename,
+                    'url': attachment.file.url if attachment.file else None,
+                    'content_type': attachment.content_type,
+                    'size': attachment.size,
+                    'matched_order': matched_order,
+                    'matched_expedition': matched_expedition,
+                })
+
+        matched_type = None
+        if has_order_match and has_expedition_match:
+            matched_type = 'both'
+        elif has_order_match:
+            matched_type = 'order'
+        elif has_expedition_match:
+            matched_type = 'expedition'
+
+        return Response({
+            'has_matches': bool(matched_messages),
+            'matched_type': matched_type,
+            'matched_messages': matched_messages,
+            'attachment_files': attachment_files,
+        })
+    
+    @action(detail=False, methods=['get'])
+    def get_first_gap_number(self, request):
+        """
+        Grąžina pirmą tuščią numerį iš tarpų užsakymų numeracijoje.
+        GET /api/orders/orders/get_first_gap_number/
+        """
+        try:
+            gap_number = get_first_available_order_gap_number()
+            if gap_number:
+                return Response({
+                    'has_gap': True,
+                    'gap_number': gap_number,
+                    'message': f'Yra tuščias numeris: {gap_number}'
+                })
+            else:
+                return Response({
+                    'has_gap': False,
+                    'gap_number': None,
+                    'message': 'Tarpų nėra'
+                })
+        except Exception as e:
+            logger.error(f"Klaida gaunant pirmą tuščią užsakymo numerį: {e}", exc_info=True)
+            return Response({
+                'has_gap': False,
+                'gap_number': None,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @action(detail=False, methods=['get'])
+    def get_gaps(self, request):
+        """
+        Grąžina visus tarpus užsakymų numeracijoje.
+        GET /api/orders/orders/get_gaps/
+        """
+        try:
+            max_gaps = int(request.query_params.get('max_gaps', 5))
+            gaps = find_order_number_gaps(max_gaps=max_gaps)
+            
+            # Formatuoti tarpus su prefix ir width
+            from apps.settings.models import OrderSettings
+            settings = OrderSettings.load()
+            prefix = settings.order_prefix.strip() if settings.order_prefix else str(datetime.now().year)
+            width = settings.order_number_width or 3
+            
+            formatted_gaps = []
+            for gap in gaps:
+                gap_start, gap_end = gap
+                if gap_start == gap_end:
+                    # Vienas numeris
+                    formatted_gaps.append({
+                        'number': f"{prefix}-{gap_start:0{width}d}",
+                        'range': f"{prefix}-{gap_start:0{width}d}",
+                        'count': 1
+                    })
+                else:
+                    # Diapazonas
+                    formatted_gaps.append({
+                        'number': f"{prefix}-{gap_start:0{width}d}",
+                        'range': f"{prefix}-{gap_start:0{width}d} - {prefix}-{gap_end:0{width}d}",
+                        'count': gap_end - gap_start + 1
+                    })
+            
+            return Response({
+                'has_gaps': len(formatted_gaps) > 0,
+                'gaps': formatted_gaps,
+                'gaps_count': sum(g['count'] for g in formatted_gaps),
+                'message': f'Rasta {len(formatted_gaps)} tarpų' if formatted_gaps else 'Tarpų nėra'
+            })
+        except Exception as e:
+            logger.error(f"Klaida gaunant užsakymų tarpus: {e}", exc_info=True)
+            return Response({
+                'has_gaps': False,
+                'gaps': [],
+                'gaps_count': 0,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AutocompleteSuggestionViewSet(viewsets.ModelViewSet):
+    """Autocomplete pasiūlymų CRUD operacijos"""
+    queryset = AutocompleteSuggestion.objects.none()  # Pradžioje tuščias, bus pakeistas get_queryset()
+    serializer_class = AutocompleteSuggestionSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['field_type', 'value']
+    search_fields = ['value']
+    ordering_fields = ['usage_count', 'last_used_at', 'created_at']
+    ordering = ['-usage_count', '-last_used_at']
+    
+    def get_queryset(self):
+        """Override get_queryset to handle case when table doesn't exist"""
+        try:
+            # Bandyti pasiekti lentelę
+            queryset = AutocompleteSuggestion.objects.all()
+            # Bandyti padaryti paprastą užklausą, kad patikrinti ar lentelė egzistuoja
+            _ = list(queryset[:1])
+            return queryset
+        except Exception as e:
+            logger.error(f"Error accessing AutocompleteSuggestion table: {e}")
+            # Return empty queryset if table doesn't exist
+            return AutocompleteSuggestion.objects.none()
+    
+    def list(self, request, *args, **kwargs):
+        """Override list to handle errors gracefully"""
+        try:
+            return super().list(request, *args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error listing AutocompleteSuggestion: {e}")
+            # Return empty list if there's an error
+            return Response({'results': [], 'count': 0}, status=status.HTTP_200_OK)
+    
+    @action(detail=False, methods=['get'], url_path='search')
+    def search_suggestions(self, request):
+        """Ieškoti pasiūlymų pagal field_type ir query"""
+        field_type = request.query_params.get('field_type')
+        query = request.query_params.get('q', '').strip()
+        
+        if not field_type:
+            return Response({'error': 'field_type yra privalomas'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Tikrinti ar field_type yra validus
+        valid_field_types = [choice[0] for choice in AutocompleteSuggestion.FieldType.choices]
+        if field_type not in valid_field_types:
+            return Response({'error': 'Netinkamas field_type'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Ieškoti pasiūlymų
+        queryset = self.get_queryset().filter(field_type=field_type)
+        
+        if query:
+            queryset = queryset.filter(value__icontains=query)
+        
+        # Rūšiuoti pagal naudojimų skaičių ir paskutinį naudojimą
+        queryset = queryset.order_by('-usage_count', '-last_used_at')[:20]
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'], url_path='save')
+    def save_suggestion(self, request):
+        """Išsaugoti naują pasiūlymą arba padidinti usage_count"""
+        field_type = request.data.get('field_type')
+        value = request.data.get('value', '').strip()
+        
+        if not field_type or not value:
+            return Response(
+                {'error': 'field_type ir value yra privalomi'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Tikrinti ar field_type yra validus
+        valid_field_types = [choice[0] for choice in AutocompleteSuggestion.FieldType.choices]
+        if field_type not in valid_field_types:
+            return Response({'error': 'Netinkamas field_type'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Rasti ar sukurti pasiūlymą
+        suggestion, created = AutocompleteSuggestion.objects.get_or_create(
+            field_type=field_type,
+            value=value,
+            defaults={'usage_count': 1}
+        )
+        
+        if not created:
+            # Jei jau egzistuoja, padidinti usage_count ir atnaujinti last_used_at
+            suggestion.usage_count += 1
+            from django.utils import timezone
+            suggestion.last_used_at = timezone.now()
+            suggestion.save()
+        
+        serializer = self.get_serializer(suggestion)
+        return Response(serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'])
+    def suggestions(self, request):
+        """
+        Grąžina autocomplete pasiūlymus pagal laukelio tipą ir užklausą.
+        GET /api/orders/autocomplete/suggestions/?field_type=city&q=vil
+        """
+        try:
+            field_type = request.query_params.get('field_type')
+            query = request.query_params.get('q', '').strip()
+            limit = int(request.query_params.get('limit', 10))
+
+            if not field_type:
+                return Response({'error': 'field_type parametras būtinas'}, status=400)
+
+            # Gauti pasiūlymus pagal tipą ir užklausą
+            suggestions = self.get_queryset().filter(field_type=field_type)
+
+            if query:
+                suggestions = suggestions.filter(value__icontains=query)
+
+            # Surūšiuoti pagal naudojimo dažnumą ir abėcėlę
+            suggestions = suggestions.order_by('-usage_count', 'value')[:limit]
+
+            result = [{
+                'value': suggestion.value,
+                'usage_count': suggestion.usage_count,
+                'last_used_at': suggestion.last_used_at
+            } for suggestion in suggestions]
+
+            return Response({
+                'suggestions': result,
+                'count': len(result),
+                'field_type': field_type,
+                'query': query
+            })
+
+        except Exception as e:
+            logger.error(f"Error getting autocomplete suggestions: {e}", exc_info=True)
+            return Response({'error': str(e)}, status=500)
+
+
+class RouteContactViewSet(viewsets.ModelViewSet):
+    """Maršruto kontaktų (siuntėjų/gavėjų) CRUD operacijos"""
+    queryset = RouteContact.objects.all()
+    serializer_class = RouteContactSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['contact_type']
+    search_fields = ['name', 'country', 'city']
+    ordering_fields = ['usage_count', 'last_used_at', 'created_at', 'name']
+    ordering = ['-usage_count', '-last_used_at']
+    
+    @action(detail=False, methods=['get'], url_path='search')
+    def search_contacts(self, request):
+        """Ieškoti kontaktų pagal tipą ir query"""
+        contact_type = request.query_params.get('contact_type')
+        query = request.query_params.get('q', '').strip()
+        
+        if not contact_type:
+            return Response({'error': 'contact_type yra privalomas'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        if contact_type not in ['sender', 'receiver']:
+            return Response({'error': 'contact_type turi būti "sender" arba "receiver"'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        queryset = RouteContact.objects.filter(contact_type=contact_type)
+        
+        if query:
+            queryset = queryset.filter(name__icontains=query)
+        
+        # Rūšiuoti pagal naudojimų skaičių ir paskutinį naudojimą
+        queryset = queryset.order_by('-usage_count', '-last_used_at', 'name')[:10]
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({'contacts': serializer.data})
+    
+    def perform_create(self, serializer):
+        """Sukurti naują kontaktą"""
+        serializer.save()
+    
+    def perform_update(self, serializer):
+        """Atnaujinti kontaktą - padidinti naudojimų skaičių"""
+        instance = serializer.save()
+        instance.usage_count += 1
+        instance.save()
+
+
+class OrderCostViewSet(viewsets.ModelViewSet):
+    """Papildomų išlaidų CRUD operacijos"""
+    queryset = OrderCost.objects.select_related('order', 'partner').all()
+    serializer_class = OrderCostSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['order', 'partner', 'cost_type', 'status', 'payment_status']
+    search_fields = ['description', 'partner__name', 'partner__code', 'expedition_number']
+    ordering_fields = ['created_at', 'due_date', 'amount_net', 'status']
+    ordering = ['-created_at']
+
+    def perform_create(self, serializer):
+        """Sukurti naują išlaidą"""
+        serializer.save()
+
+    @action(detail=True, methods=['post'])
+    def mark_paid(self, request, pk=None):
+        """Pažymėti išlaidą kaip apmokėtą"""
+        cost = self.get_object()
+        cost.payment_status = 'paid'
+        cost.payment_date = request.data.get('payment_date')
+        cost.save()
+        serializer = self.get_serializer(cost)
+        return Response(serializer.data)
+
+    @action(detail=True, methods=['post'])
+    def mark_invoice_received(self, request, pk=None):
+        """Pažymėti sąskaitą kaip gautą"""
+        cost = self.get_object()
+        cost.invoice_received = True
+        cost.invoice_date = request.data.get('invoice_date')
+        cost.save()
+        serializer = self.get_serializer(cost)
+        return Response(serializer.data)
+

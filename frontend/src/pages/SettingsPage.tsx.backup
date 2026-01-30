@@ -1,0 +1,1645 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
+import { api } from '../services/api';
+import InvoiceSettingsForm from '../components/settings/InvoiceSettingsForm';
+import OrderSettingsForm from '../components/settings/OrderSettingsForm';
+import ExpeditionSettingsForm from '../components/settings/ExpeditionSettingsForm';
+import NotificationSettingsForm from '../components/settings/NotificationSettingsForm';
+import UISettingsForm from '../components/settings/UISettingsForm';
+import EmailTemplatesForm from '../components/settings/EmailTemplatesForm';
+import RouteContactsSection from '../components/settings/RouteContactsSection';
+import BankImportInteractiveSection from '../components/settings/BankImportInteractiveSection';
+import DataExportSection from '../components/settings/DataExportSection';
+import DataImportSection_NEW from '../components/settings/DataImportSection_NEW';
+import PaymentImportSection from '../components/settings/PaymentImportSection';
+import './SettingsPage.css';
+
+interface InvoiceSettings {
+  id: number;
+  default_vat_rate: string;
+  default_payment_term_days: number;
+  invoice_prefix_sales: string;
+  invoice_number_width: number;
+  invoice_footer_text: string;
+  auto_numbering: boolean;
+  last_invoice_number?: string | null;
+  next_invoice_number?: string;
+  next_invoice_number_edit?: string;
+  default_display_options?: {
+    show_order_type?: boolean;
+    show_cargo_info?: boolean;
+    show_cargo_weight?: boolean;
+    show_cargo_ldm?: boolean;
+    show_cargo_dimensions?: boolean;
+    show_cargo_properties?: boolean;
+    show_carriers?: boolean;
+    show_carrier_name?: boolean;
+    show_carrier_route?: boolean;
+    show_carrier_dates?: boolean;
+    show_prices?: boolean;
+    show_my_price?: boolean;
+    show_other_costs?: boolean;
+  };
+  notes: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface ObligationItem {
+  text: string;
+}
+
+interface OrderSettings {
+  id: number;
+  order_prefix?: string;
+  order_number_width: number;
+  auto_numbering: boolean;
+  my_price_percentage?: number;
+  payment_terms?: string;
+  carrier_obligations?: ObligationItem[];
+  client_obligations?: ObligationItem[];
+  last_order_number?: string | null;
+  next_order_number?: string;
+  next_order_number_edit?: string;
+  notes: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface ExpeditionSettings {
+  id: number;
+  expedition_prefix: string;
+  expedition_number_width: number;
+  auto_numbering: boolean;
+  payment_terms?: string;
+  carrier_obligations?: Array<{ text: string }>;
+  client_obligations?: Array<{ text: string }>;
+  notes: string;
+  last_expedition_number?: string | null;
+  next_expedition_number?: string | null;
+  next_expedition_number_edit?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface NotificationSettings {
+  id: number;
+  // SMTP nustatymai
+  smtp_enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_use_tls: boolean;
+  smtp_username: string;
+  smtp_password?: string;
+  smtp_from_email: string;
+  smtp_from_name: string;
+  // IMAP nustatymai
+  imap_enabled: boolean;
+  imap_host: string;
+  imap_port: number;
+  imap_use_ssl: boolean;
+  imap_use_starttls: boolean;
+  imap_username: string;
+  imap_password?: string;
+  imap_folder: string;
+  imap_sync_interval_minutes: number;
+  // Automatiniai el. laiškų pranešimai - SĄSKAITOS
+  email_notify_due_soon_enabled: boolean;
+  email_notify_due_soon_days_before: number;
+  email_notify_due_soon_recipient: 'client' | 'manager' | 'both';
+  email_notify_due_soon_min_amount: number;
+  email_notify_unpaid_enabled: boolean;
+  email_notify_unpaid_interval_days: number;
+  email_notify_unpaid_recipient: 'client' | 'manager' | 'both';
+  email_notify_unpaid_min_amount: number;
+  email_notify_overdue_enabled: boolean;
+  email_notify_overdue_min_days: number;
+  email_notify_overdue_max_days: number;
+  email_notify_overdue_interval_days: number;
+  email_notify_overdue_recipient: 'client' | 'manager' | 'both';
+  email_notify_overdue_min_amount: number;
+  overdue_reminder_mode: 'automatic' | 'manual' | 'both';
+  // UŽSAKYMAI
+  email_notify_new_order_enabled: boolean;
+  email_notify_new_order_recipient: 'client' | 'manager' | 'both';
+  email_notify_order_status_changed_enabled: boolean;
+  email_notify_order_status_changed_recipient: 'client' | 'manager' | 'both';
+  // EKSPEDICIJOS
+  email_notify_new_expedition_enabled: boolean;
+  email_notify_new_expedition_recipient: 'carrier' | 'manager' | 'both';
+  email_notify_expedition_status_changed_enabled: boolean;
+  email_notify_expedition_status_changed_recipient: 'carrier' | 'manager' | 'both';
+  // MOKĖJIMAI
+  email_notify_payment_received_enabled: boolean;
+  email_notify_payment_received_recipient: 'client' | 'manager' | 'both';
+  email_notify_payment_received_min_amount: number;
+  email_notify_partial_payment_enabled: boolean;
+  email_notify_partial_payment_recipient: 'client' | 'manager' | 'both';
+  // KRITINĖS SĄSKAITOS
+  email_notify_high_amount_invoice_enabled: boolean;
+  email_notify_high_amount_threshold: number;
+  email_notify_high_amount_recipient: 'client' | 'manager' | 'both';
+  // El. laiškų pasirašymas ir pranešimai
+  email_signature: string;
+  email_auto_generated_notice: string;
+  email_contact_manager_notice: string;
+  // Testavimo režimas el. laiškams
+  email_test_mode: boolean;
+  email_test_recipient: string;
+  // UI pranešimų nustatymai
+  toast_duration_ms: number;
+  toast_position: 'top' | 'center' | 'bottom';
+  toast_enable_sound: boolean;
+  toast_success_color: string;
+  toast_error_color: string;
+  toast_info_color: string;
+  notes: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+interface PVMRate {
+  id?: number;
+  rate: string;
+  article: string;
+  is_active: boolean;
+  sequence_order: number;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface ImportResult {
+  total_transactions?: number;
+  matched_count?: number;
+  unmatched_count?: number;
+  results?: Array<{
+    date: string;
+    amount: string;
+    description: string;
+    matched: boolean;
+    invoice_number?: string;
+  }>;
+  success?: boolean;
+  error?: string;
+}
+
+interface AutocompleteSuggestion {
+  id: number;
+  field_type: string;
+  field_type_display: string;
+  value: string;
+  usage_count: number;
+  last_used_at: string;
+  created_at: string;
+}
+
+// Autocomplete Suggestions Section Component
+const AutocompleteSuggestionsSection: React.FC = () => {
+  const [activeSubTab, setActiveSubTab] = useState<'autocomplete' | 'route-contacts'>('autocomplete');
+  const [suggestions, setSuggestions] = useState<AutocompleteSuggestion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filterFieldType, setFilterFieldType] = useState<string>('all');
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingValue, setEditingValue] = useState<string>('');
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newSuggestion, setNewSuggestion] = useState<{ field_type: string; value: string }>({ field_type: 'route_from_city', value: '' });
+
+  const fieldTypeOptions = [
+    { value: 'all', label: 'Visi laukeliai' },
+    { value: 'route_from_country', label: 'Maršrutas iš - Šalis' },
+    { value: 'route_from_postal_code', label: 'Maršrutas iš - Pašto kodas' },
+    { value: 'route_from_city', label: 'Maršrutas iš - Miestas' },
+    { value: 'route_from_address', label: 'Maršrutas iš - Adresas' },
+    { value: 'route_to_country', label: 'Maršrutas į - Šalis' },
+    { value: 'route_to_postal_code', label: 'Maršrutas į - Pašto kodas' },
+    { value: 'route_to_city', label: 'Maršrutas į - Miestas' },
+    { value: 'route_to_address', label: 'Maršrutas į - Adresas' },
+    { value: 'cargo_description', label: 'Krovinių aprašymas' },
+    { value: 'order_notes', label: 'Užsakymo pastabos' },
+    { value: 'carrier_notes', label: 'Vežėjo pastabos' },
+    { value: 'vehicle_type', label: 'Mašinos tipas' },
+    { value: 'order_type', label: 'Užsakymo tipas' },
+  ];
+
+  const fetchSuggestions = async () => {
+    try {
+      setLoading(true);
+      setMessage(null); // Išvalyti ankstesnes žinutes
+      const params: any = {};
+      if (filterFieldType !== 'all') {
+        params.field_type = filterFieldType;
+      }
+      const response = await api.get('/orders/autocomplete/', { params });
+      
+      // DRF su paginacija grąžina {results: [...], count: N}
+      // Be paginacijos grąžina tiesiog masyvą [...]
+      let data = [];
+      if (response.data && typeof response.data === 'object') {
+        if (Array.isArray(response.data)) {
+          data = response.data;
+        } else if (response.data.results && Array.isArray(response.data.results)) {
+          data = response.data.results;
+        } else {
+          console.warn('Nežinomas API atsakymo formatas:', response.data);
+          data = [];
+        }
+      }
+      
+      setSuggestions(data);
+    } catch (error: any) {
+      // Detalizuota klaidos žinutė
+      let errorMessage = 'Klaida užkraunant pasiūlymus';
+      if (error.response?.status === 401) {
+        errorMessage = 'Nėra autentifikacijos. Prašome prisijungti iš naujo.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'Nėra leidimo pasiekti šį resursą.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'API endpoint nerastas. Patikrinkite, ar backend veikia.';
+      } else if (error.response?.data?.error) {
+        errorMessage = `Klaida: ${error.response.data.error}`;
+      } else if (error.response?.data?.detail) {
+        errorMessage = `Klaida: ${error.response.data.detail}`;
+      } else if (error.message) {
+        errorMessage = `Klaida: ${error.message}`;
+      }
+      
+      setMessage({ type: 'error', text: errorMessage });
+      setSuggestions([]); // Išvalyti sąrašą jei klaida
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSuggestions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterFieldType]);
+
+  // Grupuoja pasiūlymus pagal field_type ir randa dublikatus
+  const getGroupedSuggestions = () => {
+    const groups: { [key: string]: { fieldType: string; displayName: string; suggestions: AutocompleteSuggestion[]; duplicates: AutocompleteSuggestion[][] } } = {};
+
+    // Inicializuojame grupes pagal fieldTypeOptions
+    fieldTypeOptions.forEach(option => {
+      if (option.value !== 'all') {
+        groups[option.value] = {
+          fieldType: option.value,
+          displayName: option.label,
+          suggestions: [],
+          duplicates: []
+        };
+      }
+    });
+
+    // Priskiriame pasiūlymus į grupes
+    suggestions.forEach(suggestion => {
+      if (groups[suggestion.field_type]) {
+        groups[suggestion.field_type].suggestions.push(suggestion);
+      }
+    });
+
+    // Randame dublikatus kiekvienoje grupėje
+    Object.values(groups).forEach(group => {
+      group.duplicates = findDuplicates(group.suggestions);
+    });
+
+    return Object.values(groups).filter(group => group.suggestions.length > 0);
+  };
+
+  // Randa dublikatus pasiūlymų sąraše
+  const findDuplicates = (suggestionList: AutocompleteSuggestion[]): AutocompleteSuggestion[][] => {
+    const duplicates: AutocompleteSuggestion[][] = [];
+    const processed = new Set<number>();
+
+    for (let i = 0; i < suggestionList.length; i++) {
+      if (processed.has(suggestionList[i].id)) continue;
+
+      const group: AutocompleteSuggestion[] = [suggestionList[i]];
+      processed.add(suggestionList[i].id);
+
+      for (let j = i + 1; j < suggestionList.length; j++) {
+        if (processed.has(suggestionList[j].id)) continue;
+
+        // Lyginame reikšmes (case insensitive)
+        if (suggestionList[i].value.toLowerCase().trim() === suggestionList[j].value.toLowerCase().trim()) {
+          group.push(suggestionList[j]);
+          processed.add(suggestionList[j].id);
+        }
+      }
+
+      if (group.length > 1) {
+        duplicates.push(group);
+      }
+    }
+
+    return duplicates;
+  };
+
+  const handleEdit = (suggestion: AutocompleteSuggestion) => {
+    setEditingId(suggestion.id);
+    setEditingValue(suggestion.value);
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editingId || !editingValue.trim()) return;
+    
+    try {
+      await api.patch(`/orders/autocomplete/${editingId}/`, { value: editingValue.trim() });
+      setMessage({ type: 'success', text: 'Pasiūlymas sėkmingai atnaujintas' });
+      setEditingId(null);
+      setEditingValue('');
+      await fetchSuggestions();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Klaida atnaujinant pasiūlymą' });
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditingValue('');
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!window.confirm('Ar tikrai norite ištrinti šį pasiūlymą?')) return;
+
+    try {
+      await api.delete(`/orders/autocomplete/${id}/`);
+      setMessage({ type: 'success', text: 'Pasiūlymas sėkmingai ištrintas' });
+      await fetchSuggestions();
+    } catch (error: any) {
+      setMessage({ type: 'error', text: 'Klaida trinant pasiūlymą' });
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!newSuggestion.value?.trim()) {
+      setMessage({ type: 'error', text: 'Reikšmė yra privaloma' });
+      return;
+    }
+
+    try {
+      await api.post('/orders/autocomplete/', {
+        field_type: newSuggestion.field_type,
+        value: newSuggestion.value.trim()
+      });
+      setMessage({ type: 'success', text: 'Pasiūlymas sėkmingai sukurtas' });
+      setNewSuggestion({ field_type: 'route_from_city', value: '' });
+      setShowCreateForm(false);
+      await fetchSuggestions();
+    } catch (error: any) {
+      const errorMsg = error.response?.data?.detail || error.response?.data?.message || error.message || 'Klaida kuriant pasiūlymą';
+      setMessage({ type: 'error', text: errorMsg });
+    }
+  };
+  };
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return date.toLocaleString('lt-LT', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
+
+  return (
+    <div className="settings-section">
+      <h2 style={{ fontSize: '16px', marginBottom: '6px' }}>Autocomplete pasiūlymai</h2>
+      <p className="section-description" style={{ fontSize: '11px', marginBottom: '12px' }}>
+        Valdykite autocomplete pasiūlymus ir siuntėjų/gavėjų komplektus, kurie naudojami užsakymų formose.
+      </p>
+
+      {/* Sub-tabs */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '15px', borderBottom: '2px solid #dee2e6' }}>
+        <button
+          onClick={() => setActiveSubTab('autocomplete')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            border: 'none',
+            backgroundColor: 'transparent',
+            borderBottom: activeSubTab === 'autocomplete' ? '2px solid #007bff' : '2px solid transparent',
+            color: activeSubTab === 'autocomplete' ? '#007bff' : '#666',
+            cursor: 'pointer',
+            fontWeight: activeSubTab === 'autocomplete' ? 'bold' : 'normal',
+            marginBottom: '-2px'
+          }}
+        >
+          Autocomplete pasiūlymai
+        </button>
+        <button
+          onClick={() => setActiveSubTab('route-contacts')}
+          style={{
+            padding: '8px 16px',
+            fontSize: '13px',
+            border: 'none',
+            backgroundColor: 'transparent',
+            borderBottom: activeSubTab === 'route-contacts' ? '2px solid #007bff' : '2px solid transparent',
+            color: activeSubTab === 'route-contacts' ? '#007bff' : '#666',
+            cursor: 'pointer',
+            fontWeight: activeSubTab === 'route-contacts' ? 'bold' : 'normal',
+            marginBottom: '-2px'
+          }}
+        >
+          Siuntėjai/Gavėjai
+        </button>
+      </div>
+
+      {activeSubTab === 'route-contacts' ? (
+        <RouteContactsSection />
+      ) : (
+        <>
+
+      {message && (
+        <div className={`message message-${message.type}`} style={{ marginBottom: '15px' }}>
+          {message.text}
+        </div>
+      )}
+
+      <div style={{ marginBottom: '15px', display: 'flex', gap: '15px', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+            Filtruoti pagal laukelio tipą:
+          </label>
+          <select
+            value={filterFieldType}
+            onChange={(e) => setFilterFieldType(e.target.value)}
+            style={{
+              width: '100%',
+              maxWidth: '400px',
+              padding: '8px',
+              fontSize: '14px',
+              border: '1px solid #ccc',
+              borderRadius: '4px',
+            }}
+          >
+            {fieldTypeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginTop: '24px' }}>
+          <button
+            onClick={() => setShowCreateForm(!showCreateForm)}
+            style={{
+              padding: '8px 16px',
+              fontSize: '14px',
+              backgroundColor: '#28a745',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer'
+            }}
+          >
+            {showCreateForm ? '❌ Atšaukti' : '➕ Kurti naują'}
+          </button>
+        </div>
+      </div>
+
+      {showCreateForm && (
+        <div style={{
+          border: '2px solid #28a745',
+          borderRadius: '8px',
+          padding: '15px',
+          marginBottom: '20px',
+          backgroundColor: '#f8fff8'
+        }}>
+          <h3 style={{ margin: '0 0 10px 0', color: '#28a745' }}>📝 Kurti naują pasiūlymą</h3>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '15px' }}>
+            <div>
+              <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Laukelio tipas *</label>
+              <select
+                value={newSuggestion.field_type}
+                onChange={(e) => setNewSuggestion({ ...newSuggestion, field_type: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  fontSize: '14px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px'
+                }}
+              >
+                {fieldTypeOptions.filter(option => option.value !== 'all').map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: '14px', fontWeight: 'bold', display: 'block', marginBottom: '6px' }}>Reikšmė *</label>
+              <input
+                type="text"
+                value={newSuggestion.value}
+                onChange={(e) => setNewSuggestion({ ...newSuggestion, value: e.target.value })}
+                style={{
+                  width: '100%',
+                  padding: '8px',
+                  fontSize: '14px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px'
+                }}
+                placeholder="Įveskite pasiūlymo tekstą..."
+              />
+            </div>
+          </div>
+          <div style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
+            <button
+              onClick={handleCreate}
+              style={{
+                padding: '10px 20px',
+                fontSize: '14px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              💾 Sukurti
+            </button>
+            <button
+              onClick={() => setShowCreateForm(false)}
+              style={{
+                padding: '10px 20px',
+                fontSize: '14px',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer'
+              }}
+            >
+              ❌ Atšaukti
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: '40px', color: '#666' }}>
+          Kraunama...
+        </div>
+      ) : (
+        <div>
+          {/* Grupės su dublikatais */}
+          {getGroupedSuggestions().map((group) => {
+            const filteredSuggestions = filterFieldType === 'all' || filterFieldType === group.fieldType ? group.suggestions : [];
+
+            if (filteredSuggestions.length === 0) return null;
+
+            return (
+              <div key={group.fieldType} style={{ marginBottom: '30px' }}>
+                <h3 style={{
+                  fontSize: '16px',
+                  marginBottom: '10px',
+                  color: '#495057',
+                  borderBottom: `2px solid #007bff`,
+                  paddingBottom: '5px'
+                }}>
+                  🔤 {group.displayName} ({filteredSuggestions.length})
+                  {group.duplicates.length > 0 && (
+                    <span style={{ color: '#dc3545', marginLeft: '10px', fontSize: '14px' }}>
+                      ⚠️ {group.duplicates.length} dublikatų grupė(s)
+                    </span>
+                  )}
+                </h3>
+
+                {/* Dublikatų įspėjimas */}
+                {group.duplicates.length > 0 && (
+                  <div style={{
+                    backgroundColor: '#fff3cd',
+                    border: '1px solid #ffeaa7',
+                    borderRadius: '4px',
+                    padding: '10px',
+                    marginBottom: '15px'
+                  }}>
+                    <strong style={{ color: '#856404' }}>⚠️ Aptikti dubliuoti pasiūlymai:</strong>
+                    {group.duplicates.map((duplicateGroup, idx) => (
+                      <div key={idx} style={{ marginTop: '5px', color: '#856404', fontSize: '12px' }}>
+                        <strong>Grupė {idx + 1}:</strong>
+                        {duplicateGroup.map(s => `"${s.value}"`).join(' ↔ ')}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ overflowX: 'auto' }}>
+                  <table
+                    className="table"
+                    style={{
+                      width: '100%',
+                      borderCollapse: 'collapse',
+                      backgroundColor: '#fff',
+                      fontSize: '13px',
+                    }}
+                  >
+                    <thead>
+                      <tr style={{ backgroundColor: '#f5f5f5', borderBottom: '2px solid #ddd' }}>
+                        <th style={{ padding: '10px', textAlign: 'left', fontWeight: 'bold' }}>Reikšmė</th>
+                        <th style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>Naudojimų</th>
+                        <th style={{ padding: '10px', textAlign: 'left', fontWeight: 'bold' }}>Paskutinį kartą</th>
+                        <th style={{ padding: '10px', textAlign: 'center', fontWeight: 'bold' }}>Veiksmai</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSuggestions.length === 0 ? (
+                        <tr>
+                          <td colSpan={4} style={{ padding: '20px', textAlign: 'center', color: '#999' }}>
+                            Šio tipo pasiūlymų nėra
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredSuggestions.map((suggestion) => {
+                          const isDuplicate = group.duplicates.some(dupGroup =>
+                            dupGroup.some(dup => dup.id === suggestion.id)
+                          );
+
+                          return (
+                            <tr
+                              key={suggestion.id}
+                              style={{
+                                borderBottom: '1px solid #eee',
+                                backgroundColor: isDuplicate ? '#fff3cd' : (editingId === suggestion.id ? '#f0f8ff' : '#fff'),
+                              }}
+                            >
+                              <td style={{ padding: '10px' }}>
+                                {editingId === suggestion.id ? (
+                                  <input
+                                    type="text"
+                                    value={editingValue}
+                                    onChange={(e) => setEditingValue(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter') handleSaveEdit();
+                                      if (e.key === 'Escape') handleCancelEdit();
+                                    }}
+                                    style={{
+                                      width: '100%',
+                                      padding: '6px',
+                                      fontSize: '13px',
+                                      border: '1px solid #007bff',
+                                      borderRadius: '4px',
+                                    }}
+                                    autoFocus
+                                  />
+                                ) : (
+                                  <span style={{ color: isDuplicate ? '#856404' : 'inherit' }}>
+                                    {isDuplicate && '⚠️ '}{suggestion.value}
+                                  </span>
+                                )}
+                              </td>
+                              <td style={{ padding: '10px', textAlign: 'center' }}>{suggestion.usage_count}</td>
+                              <td style={{ padding: '10px' }}>{formatDate(suggestion.last_used_at)}</td>
+                              <td style={{ padding: '10px', textAlign: 'center' }}>
+                                {editingId === suggestion.id ? (
+                                  <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={handleSaveEdit}
+                                      className="btn btn-primary"
+                                      style={{ padding: '4px 8px', fontSize: '12px' }}
+                                    >
+                                      ✓
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={handleCancelEdit}
+                                      className="btn btn-secondary"
+                                      style={{ padding: '4px 8px', fontSize: '12px' }}
+                                    >
+                                      ✕
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <div style={{ display: 'flex', gap: '5px', justifyContent: 'center' }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEdit(suggestion)}
+                                      className="btn btn-secondary"
+                                      style={{ padding: '4px 8px', fontSize: '12px' }}
+                                    >
+                                      Redaguoti
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDelete(suggestion.id)}
+                                      className="btn btn-secondary"
+                                      style={{
+                                        padding: '4px 8px',
+                                        fontSize: '12px',
+                                        backgroundColor: '#dc3545',
+                                        color: 'white',
+                                        border: 'none',
+                                      }}
+                                    >
+                                      Trinti
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const SettingsPage: React.FC = () => {
+  const location = useLocation();
+  
+  // Jei atidaryta iš /bank-import, automatiškai parinkti bank-import sekciją
+  const [expandedCategories, setExpandedCategories] = useState<{ [key: string]: boolean }>({
+    'ui-nustatymai': true,
+    'numeracijos': true,
+    'komunikacijos': true,
+    'duomenu-valdymas': true,
+    'sistema': true
+  });
+
+  const toggleCategory = (categoryKey: string) => {
+    setExpandedCategories(prev => ({
+      ...prev,
+      [categoryKey]: !prev[categoryKey]
+    }));
+  };
+
+  const [activeSection, setActiveSection] = useState<'ui-settings' | 'invoice' | 'orders' | 'expedition' | 'bank-import' | 'data-import' | 'data-export' | 'email' | 'email-templates' | 'notifications' | 'autocomplete' | 'test-data' | 'payment-import'>(() => {
+    if (location.pathname === '/bank-import') {
+      return 'bank-import';
+    }
+    return 'invoice';
+  });
+  
+  // Atnaujinti activeSection, jei keičiasi URL
+  useEffect(() => {
+    if (location.pathname === '/bank-import') {
+      setActiveSection('bank-import');
+    }
+  }, [location.pathname]);
+  
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Bank Import state
+  const [bankImportFile, setBankImportFile] = useState<File | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [bankImportLoading, setBankImportLoading] = useState(false);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [bankImportResult, setBankImportResult] = useState<ImportResult | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [bankImportToast, setBankImportToast] = useState<{ type: 'success' | 'error' | 'info'; message: string; visible: boolean }>({ type: 'info', message: '', visible: false });
+  const bankImportToastTimeoutRef = useRef<number | null>(null);
+
+  // Test Data state
+  const [testDataCount, setTestDataCount] = useState(100);
+  const [testDataLoading, setTestDataLoading] = useState(false);
+  const [testDataDeleting, setTestDataDeleting] = useState(false);
+  const [testDataProgress, setTestDataProgress] = useState({ elapsed: 0, estimated: 0 });
+  const testDataTimerRef = useRef<number | null>(null);
+  const testDataStartTimeRef = useRef<number | null>(null);
+  
+  const showBankImportToast = (type: 'success' | 'error' | 'info', message: string, timeoutMs = 3500) => {
+    setBankImportToast({ type, message, visible: true });
+    if (bankImportToastTimeoutRef.current !== null) {
+      window.clearTimeout(bankImportToastTimeoutRef.current);
+    }
+    bankImportToastTimeoutRef.current = window.setTimeout(() => setBankImportToast((t) => ({ ...t, visible: false })), timeoutMs);
+  };
+  
+  useEffect(() => {
+    return () => {
+      if (bankImportToastTimeoutRef.current) {
+        window.clearTimeout(bankImportToastTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleBankImportFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setBankImportFile(e.target.files[0]);
+    }
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const handleBankImportSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bankImportFile) return;
+
+    setBankImportLoading(true);
+    const formData = new FormData();
+    formData.append('file', bankImportFile);
+
+    try {
+      const response = await api.post('/invoices/bank/upload/', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      setBankImportResult(response.data);
+      showBankImportToast('success', 'Banko išrašas sėkmingai importuotas');
+    } catch (error: any) {
+      showBankImportToast('error', error.response?.data?.error || 'Klaida importuojant failą');
+    } finally {
+      setBankImportLoading(false);
+    }
+  };
+
+  // Test Data handlers
+  const handleGenerateTestData = async () => {
+    if (!window.confirm(`Ar tikrai norite sukurti ${testDataCount} testinių užsakymų?`)) {
+      return;
+    }
+
+    setTestDataLoading(true);
+    setMessage(null);
+    setTestDataProgress({ elapsed: 0, estimated: 0 });
+    
+    // Pradėti laiko sekimą
+    testDataStartTimeRef.current = Date.now();
+    
+    // Apytikris laikas pagal užsakymų skaičių (apytikriai 0.05-0.1s per užsakymą)
+    const estimatedSeconds = Math.ceil(testDataCount * 0.1);
+    setTestDataProgress({ elapsed: 0, estimated: estimatedSeconds });
+    
+    // Timer - atnaujinti laiką kas sekundę
+    testDataTimerRef.current = window.setInterval(() => {
+      if (testDataStartTimeRef.current) {
+        const elapsed = Math.floor((Date.now() - testDataStartTimeRef.current) / 1000);
+        setTestDataProgress(prev => ({ ...prev, elapsed }));
+      }
+    }, 1000);
+
+    try {
+      const response = await api.post('/core/test-data/generate/', { count: testDataCount });
+      
+      // Sustabdyti timer
+      if (testDataTimerRef.current) {
+        clearInterval(testDataTimerRef.current);
+        testDataTimerRef.current = null;
+      }
+      
+      const actualTime = testDataStartTimeRef.current ? Math.floor((Date.now() - testDataStartTimeRef.current) / 1000) : 0;
+      
+      setMessage({
+        type: 'success',
+        text: response.data.message || `Sukurta ${response.data.stats?.orders || 0} užsakymų ir ${response.data.stats?.invoices || 0} sąskaitų per ${actualTime}s`
+      });
+      
+      if (response.data.errors && response.data.errors.length > 0) {
+        setMessage({
+          type: 'error',
+          text: `Sukurta, bet buvo klaidų: ${response.data.errors.join(', ')}`
+        });
+      }
+    } catch (error: any) {
+      // Sustabdyti timer
+      if (testDataTimerRef.current) {
+        clearInterval(testDataTimerRef.current);
+        testDataTimerRef.current = null;
+      }
+      
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.error || 'Klaida generuojant testinius duomenis'
+      });
+    } finally {
+      setTestDataLoading(false);
+      setTestDataProgress({ elapsed: 0, estimated: 0 });
+      testDataStartTimeRef.current = null;
+    }
+  };
+
+  const handleDeleteTestData = async () => {
+    if (!window.confirm('⚠️ DĖMESYS: Bus ištrinti VISI testiniai duomenys (užsakymai ir sąskaitos su "[TEST_DATA]" žyma).\n\nAr tikrai tęsti?')) {
+      return;
+    }
+
+    setTestDataDeleting(true);
+    setMessage(null);
+
+    try {
+      const response = await api.post('/core/test-data/delete/');
+      setMessage({
+        type: 'success',
+        text: response.data.message || `Ištrinta ${response.data.stats?.orders_deleted || 0} užsakymų ir ${response.data.stats?.invoices_deleted || 0} sąskaitų`
+      });
+      
+      if (response.data.errors && response.data.errors.length > 0) {
+        setMessage({
+          type: 'error',
+          text: `Ištrinta, bet buvo klaidų: ${response.data.errors.join(', ')}`
+        });
+      }
+    } catch (error: any) {
+      setMessage({
+        type: 'error',
+        text: error.response?.data?.error || 'Klaida trinant testinius duomenis'
+      });
+    } finally {
+      setTestDataDeleting(false);
+    }
+  };
+  
+  // Cleanup timer komponento išmontavimo metu
+  useEffect(() => {
+    return () => {
+      if (testDataTimerRef.current) {
+        clearInterval(testDataTimerRef.current);
+        testDataTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Invoice Settings
+  const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings>({
+    id: 0,
+    default_vat_rate: '21.00',
+    default_payment_term_days: 30,
+    invoice_prefix_sales: 'LOG',
+    invoice_number_width: 7,
+    invoice_footer_text: '',
+    auto_numbering: true,
+    default_display_options: {
+      show_order_type: true,
+      show_cargo_info: true,
+      show_cargo_weight: true,
+      show_cargo_ldm: true,
+      show_cargo_dimensions: true,
+      show_cargo_properties: true,
+      show_carriers: true,
+      show_carrier_name: true,
+      show_carrier_route: true,
+      show_carrier_dates: true,
+      show_prices: true,
+      show_my_price: true,
+      show_other_costs: true,
+    },
+    notes: '',
+  });
+
+  // Order Settings
+  const [orderSettings, setOrderSettings] = useState<OrderSettings>({
+    id: 0,
+    order_prefix: '',
+    order_number_width: 3,
+    auto_numbering: true,
+    my_price_percentage: 15.00,
+    payment_terms: '',
+    carrier_obligations: [],
+    client_obligations: [],
+    notes: '',
+  });
+
+  // Expedition Settings
+  const [expeditionSettings, setExpeditionSettings] = useState<ExpeditionSettings>({
+    payment_terms: '',
+    id: 0,
+    expedition_prefix: 'E',
+    expedition_number_width: 5,
+    auto_numbering: true,
+    carrier_obligations: [],
+    client_obligations: [],
+    notes: '',
+    last_expedition_number: null,
+    next_expedition_number: null,
+  });
+
+  // Notification Settings
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
+    id: 0,
+    smtp_enabled: false,
+    smtp_host: '',
+    smtp_port: 587,
+    smtp_use_tls: true,
+    smtp_username: '',
+    smtp_from_email: '',
+    smtp_from_name: '',
+    imap_enabled: false,
+    imap_host: '',
+    imap_port: 993,
+    imap_use_ssl: true,
+    imap_use_starttls: false,
+    imap_username: '',
+    imap_password: '',
+    imap_folder: 'INBOX',
+    imap_sync_interval_minutes: 5,
+    // SĄSKAITOS
+    email_notify_due_soon_enabled: false,
+    email_notify_due_soon_days_before: 3,
+    email_notify_due_soon_recipient: 'client',
+    email_notify_due_soon_min_amount: 0,
+    email_notify_unpaid_enabled: false,
+    email_notify_unpaid_interval_days: 7,
+    email_notify_unpaid_recipient: 'client',
+    email_notify_unpaid_min_amount: 0,
+    email_notify_overdue_enabled: false,
+    email_notify_overdue_min_days: 1,
+    email_notify_overdue_max_days: 365,
+    email_notify_overdue_interval_days: 7,
+    email_notify_overdue_recipient: 'client',
+    email_notify_overdue_min_amount: 0,
+    overdue_reminder_mode: 'automatic',
+    // UŽSAKYMAI
+    email_notify_new_order_enabled: false,
+    email_notify_new_order_recipient: 'manager',
+    email_notify_order_status_changed_enabled: false,
+    email_notify_order_status_changed_recipient: 'manager',
+    // EKSPEDICIJOS
+    email_notify_new_expedition_enabled: false,
+    email_notify_new_expedition_recipient: 'manager',
+    email_notify_expedition_status_changed_enabled: false,
+    email_notify_expedition_status_changed_recipient: 'manager',
+    // MOKĖJIMAI
+    email_notify_payment_received_enabled: false,
+    email_notify_payment_received_recipient: 'manager',
+    email_notify_payment_received_min_amount: 0,
+    email_notify_partial_payment_enabled: false,
+    email_notify_partial_payment_recipient: 'manager',
+    // KRITINĖS SĄSKAITOS
+    email_notify_high_amount_invoice_enabled: false,
+    email_notify_high_amount_threshold: 10000,
+    email_notify_high_amount_recipient: 'manager',
+    email_signature: 'TMS Sistema',
+    email_auto_generated_notice: 'Šis laiškas sugeneruotas automatiškai. Į jį atsakyti nereikia.',
+    email_contact_manager_notice: 'Kilus neaiškumams kreipkitės į vadybininką.',
+    email_test_mode: false,
+    email_test_recipient: 'info@hotmail.lt',
+    toast_duration_ms: 3500,
+    toast_position: 'center',
+    toast_enable_sound: false,
+    toast_success_color: '#28a745',
+    toast_error_color: '#dc3545',
+    toast_info_color: '#17a2b8',
+    notes: '',
+  });
+
+  useEffect(() => {
+    fetchInvoiceSettings();
+    fetchOrderSettings();
+    fetchExpeditionSettings();
+    fetchNotificationSettings();
+  }, []);
+
+  const fetchInvoiceSettings = async () => {
+    try {
+      const response = await api.get('/settings/invoice/current/');
+      const data = response.data;
+      // Užtikrinti, kad default_display_options turi visas reikalingas vertes
+      if (!data.default_display_options) {
+        data.default_display_options = {
+          show_order_type: true,
+          show_cargo_info: true,
+          show_cargo_weight: true,
+          show_cargo_ldm: true,
+          show_cargo_dimensions: true,
+          show_cargo_properties: true,
+          show_carriers: true,
+          show_carrier_name: true,
+          show_carrier_route: true,
+          show_carrier_dates: true,
+          show_prices: true,
+          show_my_price: true,
+          show_other_costs: true,
+        };
+      }
+      setInvoiceSettings(data);
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // Nėra nustatymų, naudosime numatytąsias vertes
+      } else {
+        // Error handling - silent fail
+      }
+    }
+  };
+
+  const handleSaveInvoiceSettings = async (settings: InvoiceSettings) => {
+    setSaving(true);
+    setMessage(null);
+    
+    try {
+      // Pašalinti read_only laukus prieš siuntimą
+      const { id, created_at, updated_at, last_invoice_number, next_invoice_number, ...dataToSend } = settings;
+      await api.put('/settings/invoice/current/', dataToSend);
+      setMessage({ type: 'success', text: 'Sąskaitų nustatymai išsaugoti sėkmingai!' });
+      // Atnaujinti duomenis po išsaugojimo
+      await fetchInvoiceSettings();
+      // Išvalyti next_invoice_number_edit po išsaugojimo
+      setInvoiceSettings(prev => ({ ...prev, next_invoice_number_edit: undefined }));
+    } catch (error: any) {
+      const errorMsg = error.response?.data 
+        ? (typeof error.response.data === 'string' 
+            ? error.response.data 
+            : JSON.stringify(error.response.data))
+        : error.message;
+      setMessage({ type: 'error', text: 'Klaida išsaugant: ' + errorMsg });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fetchOrderSettings = async () => {
+    try {
+      const response = await api.get('/settings/orders/current/');
+      const data = response.data;
+      // Užtikrinti, kad visi laukai būtų teisingai užkrauti
+      setOrderSettings({
+        id: data.id || 0,
+        order_prefix: data.order_prefix || '',
+        order_number_width: data.order_number_width || 3,
+        auto_numbering: data.auto_numbering !== undefined ? data.auto_numbering : true,
+        my_price_percentage: data.my_price_percentage || 15.00,
+        payment_terms: data.payment_terms || '',
+        carrier_obligations: Array.isArray(data.carrier_obligations) ? data.carrier_obligations : [],
+        client_obligations: Array.isArray(data.client_obligations) ? data.client_obligations : [],
+        notes: data.notes || '',
+        last_order_number: data.last_order_number,
+        next_order_number: data.next_order_number,
+      });
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // naudosime numatytąsias
+      } else {
+        // Error handling - silent fail
+      }
+    }
+  };
+
+  const fetchExpeditionSettings = async () => {
+    try {
+      const response = await api.get('/settings/expedition/current/');
+      const data = response.data || {};
+      setExpeditionSettings({
+        id: data.id || 0,
+        expedition_prefix: data.expedition_prefix || 'E',
+        expedition_number_width: data.expedition_number_width || 5,
+        auto_numbering: data.auto_numbering !== undefined ? data.auto_numbering : true,
+        payment_terms: data.payment_terms || '',
+        carrier_obligations: data.carrier_obligations || [],
+        client_obligations: data.client_obligations || [],
+        notes: data.notes || '',
+        last_expedition_number: data.last_expedition_number || null,
+        next_expedition_number: data.next_expedition_number || null,
+        next_expedition_number_edit: '',
+      });
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // nėra ekspedicijų nustatymų – naudoti numatytąsias
+      }
+    }
+  };
+
+  const handleSaveOrderSettings = async (settings: OrderSettings) => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const {
+        id,
+        created_at,
+        updated_at,
+        last_order_number,
+        next_order_number,
+        ...dataToSend
+      } = settings as any;
+      if (!dataToSend.carrier_obligations) dataToSend.carrier_obligations = [];
+      if (!dataToSend.client_obligations) dataToSend.client_obligations = [];
+      await api.put('/settings/orders/current/', dataToSend);
+      setMessage({ type: 'success', text: 'Užsakymų nustatymai išsaugoti sėkmingai!' });
+      await fetchOrderSettings();
+      setOrderSettings(prev => ({ ...prev, next_order_number_edit: undefined }));
+    } catch (error: any) {
+      const errorMsg = error.response?.data
+        ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data))
+        : error.message;
+      setMessage({ type: 'error', text: 'Klaida išsaugant: ' + errorMsg });
+    } finally {
+      setSaving(false);
+    }
+  };
+ 
+   const handleSaveExpeditionSettings = async (settings: ExpeditionSettings) => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const {
+        id,
+        created_at,
+        updated_at,
+        last_expedition_number,
+        next_expedition_number,
+        ...payload
+      } = settings as any;
+
+      if (!payload.next_expedition_number_edit) {
+        payload.next_expedition_number_edit = '';
+      }
+      if (!payload.carrier_obligations) payload.carrier_obligations = [];
+      if (!payload.client_obligations) payload.client_obligations = [];
+
+      await api.put('/settings/expedition/current/', payload);
+      setMessage({ type: 'success', text: 'Ekspedicijos nustatymai išsaugoti sėkmingai!' });
+      await fetchExpeditionSettings();
+      setExpeditionSettings(prev => ({ ...prev, next_expedition_number_edit: '' }));
+    } catch (error: any) {
+      const errorMsg = error.response?.data
+        ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data))
+        : error.message;
+      setMessage({ type: 'error', text: 'Klaida išsaugant: ' + errorMsg });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const fetchNotificationSettings = async () => {
+    try {
+      const response = await api.get('/settings/notifications/current/');
+      const data = response.data || {};
+      setNotificationSettings((prev) => ({
+        ...prev,
+        ...data,
+        // Užtikrinti, kad visi SMTP/IMAP laukai būtų išsaugoti
+        smtp_enabled: data.smtp_enabled ?? prev.smtp_enabled ?? false,
+        smtp_host: data.smtp_host ?? prev.smtp_host ?? '',
+        smtp_port: data.smtp_port ?? prev.smtp_port ?? 587,
+        smtp_use_tls: data.smtp_use_tls ?? prev.smtp_use_tls ?? true,
+        smtp_username: data.smtp_username ?? prev.smtp_username ?? '',
+        smtp_from_email: data.smtp_from_email ?? prev.smtp_from_email ?? '',
+        smtp_from_name: data.smtp_from_name ?? prev.smtp_from_name ?? '',
+        imap_enabled: data.imap_enabled ?? prev.imap_enabled ?? false,
+        imap_host: data.imap_host ?? prev.imap_host ?? '',
+        imap_port: data.imap_port ?? prev.imap_port ?? 993,
+        imap_use_ssl: data.imap_use_ssl ?? prev.imap_use_ssl ?? true,
+        imap_use_starttls: data.imap_use_starttls ?? prev.imap_use_starttls ?? false,
+        imap_username: data.imap_username ?? prev.imap_username ?? '',
+        imap_folder: data.imap_folder ?? prev.imap_folder ?? 'INBOX',
+        imap_sync_interval_minutes: data.imap_sync_interval_minutes ?? prev.imap_sync_interval_minutes ?? 5,
+        imap_password: '', // Visada tuščias, nes jis nėra grąžinamas iš backend'o
+        overdue_reminder_mode: data.overdue_reminder_mode ?? prev.overdue_reminder_mode ?? 'automatic',
+      }));
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        // naudosime numatytąsias
+      } else {
+        // Error handling - silent fail
+        console.error('Error fetching notification settings:', error);
+      }
+    }
+  };
+
+  const handleSaveNotificationSettings = async (settings: NotificationSettings) => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      const { id, created_at, updated_at, smtp_password, imap_password, ...dataToSend } = settings as any;
+      // Jei slaptažodis nėra nurodytas arba tuščias, nepridėti
+      if (smtp_password && smtp_password.trim() !== '') {
+        dataToSend.smtp_password = smtp_password;
+      }
+      if (imap_password && imap_password.trim() !== '') {
+        dataToSend.imap_password = imap_password;
+      }
+      await api.put('/settings/notifications/current/', dataToSend);
+      setMessage({ type: 'success', text: 'Pranešimų nustatymai išsaugoti sėkmingai!' });
+      await fetchNotificationSettings();
+    } catch (error: any) {
+      const errorMsg = error.response?.data ? (typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data)) : error.message;
+      setMessage({ type: 'error', text: 'Klaida išsaugant: ' + errorMsg });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const categories = [
+    {
+      key: 'ui-nustatymai',
+      label: '🎨 UI nustatymai',
+      items: [
+        { key: 'ui-settings', label: 'Sąsajos nustatymai' }
+      ]
+    },
+    {
+      key: 'numeracijos',
+      label: '📋 Numeracijos nustatymai',
+      items: [
+        { key: 'invoice', label: 'Sąskaitų nustatymai' },
+        { key: 'orders', label: 'Užsakymų nustatymai' },
+        { key: 'expedition', label: 'Ekspedicijos nustatymai' }
+      ]
+    },
+    {
+      key: 'komunikacijos',
+      label: '📧 Komunikacijos',
+      items: [
+        { key: 'email', label: 'El. pašto nustatymai' },
+        { key: 'email-templates', label: 'El. laiškų šablonai' },
+        { key: 'notifications', label: 'Pranešimai' }
+      ]
+    },
+    {
+      key: 'duomenu-valdymas',
+      label: '💾 Duomenų valdymas',
+      items: [
+        { key: 'bank-import', label: 'Banko importas' },
+        { key: 'data-export', label: 'Duomenų eksportas' },
+        { key: 'data-import', label: 'Duomenų importas' },
+        { key: 'payment-import', label: 'Mokėjimų importavimas' }
+      ]
+    },
+    {
+      key: 'sistema',
+      label: '⚙️ Sistema',
+      items: [
+        { key: 'autocomplete', label: 'Autocomplete pasiūlymai' },
+        { key: 'test-data', label: 'Testiniai duomenys' }
+      ]
+    }
+  ];
+
+  return (
+    <div className="page">
+      <div className="container settings-container">
+        <div className="settings-layout">
+          {/* Sidebar */}
+          <div className="settings-sidebar">
+            {categories.map((category) => (
+              <div key={category.key} className="settings-category">
+          <button
+                  className="settings-category-header"
+                  onClick={() => toggleCategory(category.key)}
+          >
+                  <span>{category.label}</span>
+                  <span className="category-arrow">
+                    {expandedCategories[category.key] ? '▼' : '▶'}
+                  </span>
+          </button>
+                {expandedCategories[category.key] && (
+                  <div className="settings-category-items">
+                    {category.items.map((item) => (
+          <button
+                        key={item.key}
+                        className={`settings-category-item ${activeSection === item.key ? 'active' : ''}`}
+                        onClick={() => setActiveSection(item.key as any)}
+          >
+                        {item.label}
+          </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+        </div>
+
+          {/* Content */}
+          <div className="settings-content">
+
+        {/* UI Settings Section */}
+        {activeSection === 'ui-settings' && (
+          <UISettingsForm />
+        )}
+
+        {/* Message */}
+        {message && (
+          <div className={`message message-${message.type}`}>
+            {message.text}
+          </div>
+        )}
+
+        {/* Invoice Settings Section */}
+        {activeSection === 'invoice' && (
+          <InvoiceSettingsForm
+            invoiceSettings={invoiceSettings}
+            onUpdate={setInvoiceSettings}
+            onSave={handleSaveInvoiceSettings}
+            onMessage={setMessage}
+            saving={saving}
+                      />
+        )}
+
+        {/* Order Settings Section */}
+        {activeSection === 'orders' && (
+          <OrderSettingsForm
+            orderSettings={orderSettings}
+            onUpdate={setOrderSettings}
+            onSave={handleSaveOrderSettings}
+            onMessage={setMessage}
+            saving={saving}
+          />
+        )}
+
+        {/* Expedition Settings Section */}
+        {activeSection === 'expedition' && (
+          <ExpeditionSettingsForm
+            expeditionSettings={expeditionSettings}
+            onUpdate={setExpeditionSettings}
+            onSave={handleSaveExpeditionSettings}
+            saving={saving}
+          />
+        )}
+
+        {/* Notification Settings Section */}
+        {activeSection === 'email' && (
+          <NotificationSettingsForm
+            notificationSettings={notificationSettings}
+            onUpdate={setNotificationSettings}
+            onSave={handleSaveNotificationSettings}
+            saving={saving}
+            mode="email"
+          />
+        )}
+
+        {/* Email Templates Section */}
+        {activeSection === 'email-templates' && (
+          <EmailTemplatesForm />
+        )}
+
+        {/* UI Notification Settings Section */}
+        {activeSection === 'notifications' && (
+          <NotificationSettingsForm
+            notificationSettings={notificationSettings}
+            onUpdate={setNotificationSettings}
+            onSave={handleSaveNotificationSettings}
+            saving={saving}
+            mode="notifications"
+                      />
+        )}
+
+        {/* Old Invoice Settings Section - REMOVED - now using InvoiceSettingsForm component */}
+
+        {/* Order Settings Section - REMOVED - now using OrderSettingsForm component */}
+
+        {/* Bank Import Section - INTERACTIVE MODE */}
+        {activeSection === 'bank-import' && (
+          <BankImportInteractiveSection />
+        )}
+
+        {/* Data Import Section */}
+        {activeSection === 'data-import' && (
+          // eslint-disable-next-line react/jsx-pascal-case
+          <DataImportSection_NEW />
+        )}
+
+        {/* Data Export Section */}
+        {activeSection === 'data-export' && (
+          <DataExportSection />
+        )}
+
+        {/* Payment Import Section */}
+        {activeSection === 'payment-import' && (
+          <PaymentImportSection />
+        )}
+
+        {/* Notification Settings Section */}
+        {/* Autocomplete Suggestions Section */}
+        {activeSection === 'autocomplete' && (
+          <AutocompleteSuggestionsSection />
+        )}
+
+        {/* Notification Settings Section - REMOVED - now using NotificationSettingsForm component */}
+
+        {/* PVM Rate Form Modal - REMOVED - now using PvmRateFormModal component */}
+
+        {/* Test Data Section */}
+        {activeSection === 'test-data' && (
+          <div className="settings-section">
+            <h2 style={{ fontSize: '16px', marginBottom: '15px' }}>Testinių duomenų valdymas</h2>
+            <p style={{ fontSize: '12px', color: '#666', marginBottom: '20px' }}>
+              Generuojami testiniai duomenys su įvairiomis variacijomis: užsakymai su visais laukais,
+              sąskaitos su skirtingomis būsenomis (vėluojančios, apmokėtos, neapmokėtos).
+              Naudojami esami partneriai, vežėjai ir vadybininkai iš duomenų bazės.
+            </p>
+            
+            <div className="card" style={{ marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '14px', marginBottom: '15px' }}>Generuoti testinius duomenis</h3>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '5px', fontSize: '12px' }}>
+                  Užsakymų skaičius:
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="1000"
+                  value={testDataCount}
+                  onChange={(e) => setTestDataCount(parseInt(e.target.value) || 100)}
+                  style={{ width: '150px', padding: '6px', fontSize: '12px', border: '1px solid #ccc', borderRadius: '4px' }}
+                />
+              </div>
+              <button
+                type="button"
+                className="button"
+                onClick={handleGenerateTestData}
+                disabled={testDataLoading}
+                style={{ backgroundColor: '#28a745', color: 'white', marginBottom: '15px' }}
+              >
+                {testDataLoading ? 'Generuojama...' : 'Sukurti testinius duomenis'}
+              </button>
+              
+              {/* Progress bar su laiku */}
+              {testDataLoading && (
+                <div style={{ 
+                  marginTop: '15px', 
+                  padding: '15px', 
+                  backgroundColor: '#f8f9fa', 
+                  borderRadius: '8px',
+                  border: '1px solid #dee2e6'
+                }}>
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    marginBottom: '10px',
+                    fontSize: '14px'
+                  }}>
+                    <span style={{ fontWeight: 'bold', color: '#495057' }}>
+                      Eiga: {testDataProgress.elapsed}s
+                    </span>
+                    {testDataProgress.estimated > 0 && (
+                      <span style={{ color: '#6c757d', fontSize: '12px' }}>
+                        Apytikris laikas: ~{testDataProgress.estimated}s
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Progress bar */}
+                  <div style={{
+                    width: '100%',
+                    height: '20px',
+                    backgroundColor: '#e9ecef',
+                    borderRadius: '10px',
+                    overflow: 'hidden',
+                    position: 'relative'
+                  }}>
+                    <div style={{
+                      width: testDataProgress.estimated > 0 
+                        ? `${Math.min(100, (testDataProgress.elapsed / testDataProgress.estimated) * 100)}%`
+                        : '0%',
+                      height: '100%',
+                      backgroundColor: '#28a745',
+                      transition: 'width 0.3s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white',
+                      fontSize: '11px',
+                      fontWeight: 'bold'
+                    }}>
+                      {testDataProgress.estimated > 0 
+                        ? `${Math.min(100, Math.round((testDataProgress.elapsed / testDataProgress.estimated) * 100))}%`
+                        : '0%'}
+                    </div>
+                  </div>
+                  
+                  <div style={{ 
+                    marginTop: '8px', 
+                    fontSize: '12px', 
+                    color: '#6c757d',
+                    textAlign: 'center'
+                  }}>
+                    Kuriami {testDataCount} užsakymai...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card" style={{ marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '14px', marginBottom: '15px', color: '#dc3545' }}>Ištrinti testinius duomenis</h3>
+              <p style={{ fontSize: '12px', color: '#666', marginBottom: '15px' }}>
+                ⚠️ DĖMESYS: Bus ištrinti VISI testiniai duomenys (užsakymai ir sąskaitos su "[TEST_DATA]" žyma).
+                Esami duomenys nebus paveikti.
+              </p>
+              <button
+                type="button"
+                className="button"
+                onClick={handleDeleteTestData}
+                disabled={testDataDeleting}
+                style={{ backgroundColor: '#dc3545', color: 'white' }}
+              >
+                {testDataDeleting ? 'Ištrinama...' : 'Ištrinti testinius duomenis'}
+              </button>
+            </div>
+          </div>
+        )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SettingsPage;

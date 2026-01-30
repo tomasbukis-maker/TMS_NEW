@@ -1,0 +1,32 @@
+{
+  "venvPath": ".",
+  "venv": "venv",
+  "reportMissingImports": false,
+  "reportMissingModuleSource": false,
+  "reportUnknownMemberType": false,
+  "reportUnknownArgumentType": false,
+  "reportUnknownVariableType": false,
+  "reportUnknownLambdaType": false,
+  "reportGeneralTypeIssues": false,
+  "reportPrivateUsage": false,
+  "reportOptionalMemberAccess": false,
+  "reportOptionalSubscript": false,
+  "reportPrivateImportUsage": false,
+  "reportIncompatibleMethodOverride": false,
+  "reportIncompatibleVariableOverride": false,
+  "reportCallIssue": false,
+  "reportArgumentType": false,
+  "reportOperatorIssue": false,
+  "pythonVersion": "3.9",
+  "typeCheckingMode": "off",
+  "exclude": [
+    "apps/invoices/views.py",
+    "apps/invoices/models.py"
+  ],
+  "executionEnvironments": [
+    {
+      "root": ".",
+      "venv": "venv"
+    }
+  ]
+}

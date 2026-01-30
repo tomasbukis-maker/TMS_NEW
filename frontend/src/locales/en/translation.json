@@ -1,0 +1,223 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "search": "Search",
+    "loading": "Loading...",
+    "no_data": "No data",
+    "actions": "Actions",
+    "view": "View",
+    "add": "Add",
+    "yes": "Yes",
+    "no": "No",
+    "status": "Status",
+    "date": "Date",
+    "number": "Number",
+    "sum": "Sum",
+    "profit": "Profit",
+    "client": "Client",
+    "carrier": "Carrier",
+    "route": "Route",
+    "manager": "Manager",
+    "notes": "Notes",
+    "months": {
+      "january": "January",
+      "february": "February",
+      "march": "March",
+      "april": "April",
+      "may": "May",
+      "june": "June",
+      "july": "July",
+      "august": "August",
+      "september": "September",
+      "october": "October",
+      "november": "November",
+      "december": "December"
+    },
+    "periods": {
+      "month": "Month",
+      "all_time": "All time",
+      "label": "Period"
+    }
+  },
+  "navigation": {
+    "dashboard": "Dashboard",
+    "orders": "Orders",
+    "invoices": "Invoices",
+    "partners": "Partners",
+    "settings": "Settings",
+    "expeditions": "Expeditions",
+    "mail": "Mail",
+    "suppliers": "Suppliers",
+    "categories": "Categories",
+    "company_info": "Company Details",
+    "user_settings": "User Settings",
+    "logout": "Logout",
+    "transport_module": "Transport",
+    "expenses_module": "Other Expenses"
+  },
+  "orders": {
+    "title": "Orders",
+    "add_new": "Add New Order",
+    "table": {
+      "date": "Order Date",
+      "number": "Number",
+      "email_received": "Email Received",
+      "client": "Client",
+      "docs_received": "Docs Received",
+      "client_price": "Client Price (Excl. VAT)",
+      "route": "Route",
+      "carrier": "Carrier",
+      "carrier_price": "Carrier Price (Excl. VAT)",
+      "profit": "Profit",
+      "actions": "Actions",
+      "no_orders": "No orders found",
+      "multiple_carriers": "Multiple Carriers"
+    },
+    "status": {
+      "new": "New",
+      "in_progress": "In Progress",
+      "completed": "Completed",
+      "cancelled": "Cancelled",
+      "paid": "Paid",
+      "not_paid": "Unpaid",
+      "overdue": "Overdue"
+    },
+    "tooltips": {
+      "paid": "Paid",
+      "overdue": "Overdue by {{days}} d.",
+      "due_today": "Due today",
+      "days_left": "{{days}} d. left",
+      "no_invoice": "Invoice not issued"
+    }
+  },
+  "partners": {
+    "title": "Partners",
+    "table": {
+      "name": "Name",
+      "code": "Code",
+      "vat": "VAT",
+      "address": "Address",
+      "contact": "Contact",
+      "phone": "Phone",
+      "email": "Email",
+      "all_emails": "All Emails",
+      "term": "Term",
+      "type": "Type",
+      "status": "Status",
+      "contacts_count": "Contacts",
+      "actions": "Actions",
+      "no_partners": "No partners found"
+    },
+    "status": {
+      "active": "Active",
+      "blocked": "Blocked"
+    }
+  },
+  "expeditions": {
+    "title": "Expeditions",
+    "table": {
+      "number": "Expedition No.",
+      "created": "Created",
+      "partner": "Partner",
+      "route": "Route",
+      "loading_unloading": "Loading/Unloading",
+      "status": "Status",
+      "payment_status": "Payment Status",
+      "documents": "Documents",
+      "no_expeditions": "No expeditions found."
+    },
+    "filters": {
+      "all_statuses": "All statuses",
+      "all_types": "All types"
+    },
+    "types": {
+      "carrier": "Carrier",
+      "warehouse": "Warehouse"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "stats": {
+      "unpaid_sales": "Unpaid Sales Invoices",
+      "overdue_sales": "Overdue Sales Invoices",
+      "unpaid_purchase": "Unpaid Purchase Invoices",
+      "overdue_purchase": "Overdue Purchase Invoices",
+      "new_orders": "New Orders (This Month)",
+      "unfinished_orders": "Unfinished Orders",
+      "profit_month": "Monthly Profit Forecast"
+    },
+    "alerts": {
+      "title": "Alerts & Notifications"
+    },
+    "sections": {
+      "unfinished_orders": "Unfinished Orders",
+      "sales_no_invoice": "Sales Without Invoices",
+      "carrier_no_invoice": "Carriers Without Invoices"
+    },
+    "finance": {
+      "title": "Finance",
+      "profit_from_orders": "Profit (from orders)",
+      "profit_description": "Orders created {{period}}",
+      "client_prices": "Client Prices",
+      "carrier_prices": "Carrier Prices",
+      "other_costs": "Other Costs",
+      "carrier_and_other_costs": "Carrier and other costs",
+      "invoices_issued_for": "Invoices issued for",
+      "invoices_received_for": "Invoices received for",
+      "invoices_description": "Invoices issued {{period}}",
+      "paid": "Paid",
+      "unpaid": "Unpaid"
+    },
+    "invoices_stats": {
+      "title": "Invoices",
+      "paid_sales": "Paid Issued",
+      "unpaid_sales": "Unpaid Issued",
+      "overdue_sales": "Overdue Issued",
+      "paid_purchase": "Paid Received",
+      "unpaid_purchase": "Unpaid Received",
+      "overdue_purchase": "Overdue Received"
+    },
+    "orders_stats": {
+      "title": "Orders",
+      "finished": "Finished",
+      "unfinished": "Unfinished",
+      "new": "New (this month)"
+    }
+  },
+  "invoices": {
+    "title": "Invoices",
+    "invoice_number": "Invoice No.",
+    "invoice_date": "Invoice Date",
+    "due_date": "Due Date",
+    "amount": "Amount",
+    "vat": "VAT",
+    "total": "Total",
+    "issued": "Issued",
+    "received": "Received",
+    "paid": "Paid",
+    "not_paid": "Not Paid",
+    "partially_paid": "Partially Paid",
+    "overdue": "Overdue",
+    "table": {
+      "number": "Invoice Number",
+      "type": "Type",
+      "client": "Client",
+      "amount": "Amount",
+      "issue_date": "Issue Date",
+      "due_date": "Due Date",
+      "payment_status": "Payment Status",
+      "actions": "Actions",
+      "no_sales_invoices": "No sales invoices found",
+      "with_vat": "(with VAT)",
+      "without_vat": "(without VAT)",
+      "overdue_paid": "(Overdue by {{days}} d.)",
+      "paid_on_time": "(Paid on time)",
+      "overdue": "(Overdue by {{days}} d.)",
+      "days_left": "({{days}} d. left)",
+      "due_today": "(Due today)"
+    }
+  }
+}

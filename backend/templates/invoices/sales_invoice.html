@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <title>{{ labels.invoice_title }} {{ invoice.invoice_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        
+        html, body {
+            background-color: #FAFAFA;
+            margin: 0;
+            padding: 0;
+            font-family: verdana, arial, helvetica, sans-serif;
+        }
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            background: #fff;
+            position: relative;
+            padding: 10mm;
+            margin: 0 auto;
+        }
+        
+        .subpage {
+            padding-left: 10mm;
+            padding-right: 5mm;
+            padding-top: 10mm;
+            padding-bottom: 3mm;
+            background-color: #FFF;
+            width: 100%;
+            min-height: 277mm;
+        }
+    
+        .infot_footer_onscreen {
+            position: absolute;
+            width: 195mm;
+            bottom: 3mm;
+            text-align:initial;
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        .subpage div{
+            text-align:left;
+        }
+        
+        @media print {
+            @page {
+                size: A4;
+                margin: 0;
+            }
+            html, body {
+                background-color: #FFFFFF;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            .page {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 0;
+                padding: 10mm;
+                border: none;
+                box-shadow: none;
+            }
+            .subpage {
+                padding-left: 10mm;
+                padding-right: 5mm;
+                padding-top: 10mm;
+                padding-bottom: 3mm;
+                margin: 0;
+                border: 0;
+                width: 100%;
+                min-height: auto;
+            }
+            .action-buttons {
+                display: none !important;
+            }
+            .toast-container {
+                display: none !important;
+            }
+        }
+        
+        /* Action buttons */
+        .action-buttons {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+        
+        .action-button:hover { background-color: #0056b3; }
+        .action-button.email { background-color: #28a745; }
+        
+        /* Toast notification */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: none;
+        }
+        
+        .toast {
+            min-width: 300px;
+            max-width: 500px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            margin-bottom: 12px;
+            animation: slideIn 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .toast.success { background-color: #d4edda; border-left: 4px solid #28a745; color: #155724; }
+        .toast.error { background-color: #f8d7da; border-left: 4px solid #dc3545; color: #721c24; }
+        .toast.info { background-color: #d1ecf1; border-left: 4px solid #17a2b8; color: #0c5460; }
+        
+        .toast-icon { font-size: 20px; flex-shrink: 0; }
+        .toast-message { flex: 1; font-size: 14px; line-height: 1.5; }
+        .toast-close { background: none; border: none; font-size: 20px; cursor: pointer; color: inherit; opacity: 0.6; padding: 0; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .toast-close:hover { opacity: 1; }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        @media print {
+            .toast-container { display: none !important; }
+        }
+        
+        table.sask_lentele tr {
+            page-break-after: auto !important;
+            page-break-inside: avoid !important;
+        }
+        
+        .tmp_table_eil {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+        
+        .tmp_body {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 12px;
+            color: #000000;
+        }
+
+        .forma {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+
+        .tmp_table_head {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+
+        .signatures-container {
+            margin-top: 50px;
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+        }
+
+        .signature-box {
+            width: 45%;
+        }
+
+        .signature-label {
+            font-size: 10px;
+            font-weight: bold;
+            margin-bottom: 20px;
+        }
+
+        .signature-line-container {
+            border-top: 1px solid #000;
+            display: flex;
+            justify-content: space-between;
+            padding-top: 2px;
+        }
+
+        .signature-sub-label {
+            font-size: 8px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <div class="page">
+        <!-- Action buttons -->
+        <div class="action-buttons" id="actionButtons">
+            <button onclick="downloadPDF()" class="action-button">PDF</button>
+            <button onclick="sendEmail()" class="action-button email">El. paštas</button>
+        </div>
+
+        <script>
+            // Paslėpti mygtukus, jei rodoma per iframe (modaliniame lange)
+            if (window.self !== window.top) {
+                document.getElementById('actionButtons').style.display = 'none';
+            }
+        </script>
+
+        <div class="subpage">
+            <div id="saskaita">
+                {% if logo_url %}
+                <div style="text-align: center; padding-bottom: 10px;">
+                    <img src="{{ logo_url }}" alt="{{ company.name }}" style="max-height: 50px; max-width: 200px;">
+                </div>
+                {% endif %}
+                
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="tmp_body" style="vertical-align: top; width:33%">
+                                {{ labels.seller }}<br>
+                                <b>{{ company.name }}</b><br>
+                                {% if company.code %}{{ labels.code }} <b>{{ company.code }}</b><br>{% endif %}
+                                {% if company.vat_code %}{{ labels.vat_code }} <b>{{ company.vat_code }}</b><br>{% endif %}
+                                {{ labels.address }} <br>
+                                <b>{{ company.address }}, {{ company.city }}</b><br>
+                                {% if company.phone %}{{ labels.phone }} <b>{{ company.phone }}</b><br>{% endif %}
+                                {% if company.email %}{{ labels.email }} <b>{{ company.email }}</b><br>{% endif %}
+                            </td>
+                            <td style="width:34%"></td>
+                            <td class="tmp_body" style="vertical-align: top; width:33%">
+                                {{ labels.buyer }}<br>
+                                <b>{{ invoice.partner.name }}</b><br>
+                                {% if invoice.partner.code %}{{ labels.code }} <b>{{ invoice.partner.code }}</b><br>{% endif %}
+                                {% if invoice.partner.vat_code %}{{ labels.vat_code }} <b>{{ invoice.partner.vat_code }}</b><br>{% endif %}
+                                {{ labels.address }} <br>
+                                <b>{{ invoice.partner.address }}</b><br>
+                                <b>{% if invoice.partner.city and invoice.partner.country %}{{ invoice.partner.city }}, {{ invoice.partner.country }}{% elif invoice.partner.city %}{{ invoice.partner.city }}{% elif invoice.partner.country %}{{ invoice.partner.country }}{% endif %}</b>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="tmp_body" colspan="2">
+                                {% if company.bank_name %}<br><b>{{ labels.bank }}</b>{{ company.bank_name }}{% endif %}
+                                {% if company.bank_code %}<br>{{ labels.code }} {{ company.bank_code }}{% endif %}
+                                {% if company.bank_account %}<br>{{ labels.account }} {{ company.bank_account }}{% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <hr>
+                <div style="text-align: center; font-weight: bold; font-size: 14px;">
+                    {{ labels.invoice_title }} {{ labels.number }} {{ invoice.invoice_number }}
+                </div>
+                <div style="text-align: center; font-size: 12px;">
+                    {{ labels.date }} {{ invoice.issue_date|date:"Y.m.d" }}
+                </div>
+                {% if main_order_info %}
+                <div style="text-align: center; font-size: 12px; font-weight: bold; margin-top: 5px;">
+                    {{ main_order_info }}
+                </div>
+                {% endif %}
+                <hr>
+
+                <div style="display: table; width: 100%; border-collapse: collapse; border: 1px solid #000;">
+                    <div style="display: table-row; background: #f0f0f0;">
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 5%;">Nr.</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 45%;">{{ labels.description }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 13%;">{{ labels.amount }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 10%;">{{ labels.vat_rate }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 12%;">PVM suma</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 15%;">{{ labels.total }}</div>
+                    </div>
+                    {% for item in invoice_items %}
+                    <div style="display: table-row;">
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center;">{{ forloop.counter }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px;">{{ item.description|safe }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: right;">{{ item.amount_net|floatformat:2 }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center;">{{ item.vat_rate|floatformat:0 }}%</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: right;">{{ item.vat_amount|floatformat:2 }}</div>
+                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: right;">{{ item.amount_total|floatformat:2 }}</div>
+                    </div>
+                    {% endfor %}
+                </div>
+
+                <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
+                    <table border="0" cellspacing="0" cellpadding="2" style="width: 300px; border-collapse: collapse;">
+                        <tr>
+                            <td class="forma" style="text-align: right;">Suma be PVM:</td>
+                            <td class="forma" style="text-align: right; width: 100px;"><b>{{ invoice.amount_net|floatformat:2 }} EUR</b></td>
+                        </tr>
+                        <tr>
+                            <td class="forma" style="text-align: right;">PVM suma:</td>
+                            <td class="forma" style="text-align: right;"><b>{{ vat_amount|floatformat:2 }} EUR</b></td>
+                        </tr>
+                        <tr style="border-top: 1px solid #000;">
+                            <td class="forma" style="text-align: right; font-size: 12px;"><b>{{ labels.total_eur }}:</b></td>
+                            <td class="forma" style="text-align: right; font-size: 12px;"><b>{{ invoice.amount_total|floatformat:2 }} EUR</b></td>
+                        </tr>
+                    </table>
+                </div>
+
+                {% if vat_rate_articles %}
+                <div style="margin-top: 5px; font-size: 10px; color: #000; font-weight: bold;">
+                    {% for article in vat_rate_articles %}
+                    <div>PVM straipsnis: {{ article }}{% if not forloop.last %}<br>{% endif %}</div>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                
+                <div style="margin-top: 10px; font-size: 10px;">
+                    {{ labels.amount_in_words }} <i>{{ amount_in_words }}</i>
+                </div>
+
+                <div style="margin-top: 20px;">
+                    <b>{{ labels.due_date }} {{ invoice.due_date|date:"Y.m.d" }}</b>
+                </div>
+
+                {% if loading_unloading_info %}
+                <div style="margin-top: 10px; padding: 3px 4px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 2px;">
+                    <div style="font-size: 9px; font-weight: bold; margin-bottom: 3px; color: #000;">
+                        {% if lang == 'en' %}Loading/Unloading Information{% elif lang == 'ru' %}Информация о погрузке/разгрузке{% else %}Pakrovimo/Iškrovimo informacija{% endif %}
+                    </div>
+                    <div style="display: table; width: 100%; border-collapse: collapse; font-size: 8px;">
+                        <div style="display: table-row; background: #f0f0f0; font-weight: bold;">
+                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; width: 20%; text-align: center;">
+                                {% if lang == 'en' %}Order{% elif lang == 'ru' %}Заказ{% else %}Užsakymas{% endif %}
+                            </div>
+                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; width: 40%; text-align: center;">
+                                {% if lang == 'en' %}Loading{% elif lang == 'ru' %}Погрузка{% else %}Pakrovimas{% endif %}
+                            </div>
+                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; width: 40%; text-align: center;">
+                                {% if lang == 'en' %}Unloading{% elif lang == 'ru' %}Разгрузка{% else %}Iškrovimas{% endif %}
+                            </div>
+                        </div>
+                        {% for order_info in loading_unloading_info %}
+                        <div style="display: table-row;">
+                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; vertical-align: top; font-size: 7px; line-height: 1.2;">
+                                {% if order_info.client_order_number %}
+                                <div style="margin-bottom: 2px;"><strong>{% if lang == 'en' %}Client No.{% elif lang == 'ru' %}Клиент №{% else %}Kliento nr.{% endif %}:</strong> {{ order_info.client_order_number }}</div>
+                                {% endif %}
+                                {% if order_info.order_number %}
+                                <div>
+                                    <strong>{% if lang == 'en' %}Carrier No.{% elif lang == 'ru' %}Перевозчик №{% else %}Vežėjo nr.{% endif %}:</strong> 
+                                    {{ order_info.order_number }}{% if order_info.expedition_number %} ({{ order_info.expedition_number }}){% endif %}
+                                </div>
+                                {% endif %}
+                                {% if not order_info.client_order_number and not order_info.order_number %}
+                                <div style="color: #999; font-style: italic;">—</div>
+                                {% endif %}
+                            </div>
+                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; vertical-align: top;">
+                                {% if order_info.loading.address or order_info.loading.sender or order_info.loading.date %}
+                                    {% if order_info.loading.sender %}
+                                    <div style="font-size: 7px; color: #333; line-height: 1.2;">
+                                        <strong>{% if lang == 'en' %}S{% elif lang == 'ru' %}О{% else %}S{% endif %}:</strong> {{ order_info.loading.sender }}
+                                    </div>
+                                    {% endif %}
+                                    {% if order_info.loading.address %}
+                                    <div style="font-size: 7px; color: #333; line-height: 1.2;">
+                                        <strong>{% if lang == 'en' %}A{% elif lang == 'ru' %}А{% else %}A{% endif %}:</strong> {{ order_info.loading.address }}
+                                    </div>
+                                    {% endif %}
+                                    {% if order_info.loading.date %}
+                                    <div style="font-size: 7px; color: #333; line-height: 1.2;">
+                                        <strong>{% if lang == 'en' %}D{% elif lang == 'ru' %}Д{% else %}D{% endif %}:</strong> {{ order_info.loading.date }}
+                                    </div>
+                                    {% endif %}
+                                {% else %}
+                                    <div style="font-size: 7px; color: #999; font-style: italic; line-height: 1.2;">
+                                        {% if lang == 'en' %}Not specified{% elif lang == 'ru' %}Не указано{% else %}Nenurodyta{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; vertical-align: top;">
+                                {% if order_info.unloading.address or order_info.unloading.receiver or order_info.unloading.date %}
+                                    {% if order_info.unloading.receiver %}
+                                    <div style="font-size: 7px; color: #333; line-height: 1.2;">
+                                        <strong>{% if lang == 'en' %}R{% elif lang == 'ru' %}П{% else %}G{% endif %}:</strong> {{ order_info.unloading.receiver }}
+                                    </div>
+                                    {% endif %}
+                                    {% if order_info.unloading.address %}
+                                    <div style="font-size: 7px; color: #333; line-height: 1.2;">
+                                        <strong>{% if lang == 'en' %}A{% elif lang == 'ru' %}А{% else %}A{% endif %}:</strong> {{ order_info.unloading.address }}
+                                    </div>
+                                    {% endif %}
+                                    {% if order_info.unloading.date %}
+                                    <div style="font-size: 7px; color: #333; line-height: 1.2;">
+                                        <strong>{% if lang == 'en' %}D{% elif lang == 'ru' %}Д{% else %}D{% endif %}:</strong> {{ order_info.unloading.date }}
+                                    </div>
+                                    {% endif %}
+                                {% else %}
+                                    <div style="font-size: 7px; color: #999; font-style: italic; line-height: 1.2;">
+                                        {% if lang == 'en' %}Not specified{% elif lang == 'ru' %}Не указано{% else %}Nenurodyta{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="signatures-container">
+                    <!-- Seller (Issued by) -->
+                    <div class="signature-box">
+                        <div class="signature-label">{{ labels.issued_by }}</div>
+                        <div style="margin-bottom: 5px;">
+                            {{ invoice_issuer|default:"" }}
+                        </div>
+                        {% if signature_url %}
+                        <div style="height: 40px;">
+                            <img src="{{ signature_url }}" style="max-height: 40px;">
+                        </div>
+                        {% else %}
+                        <div style="height: 40px;"></div>
+                        {% endif %}
+                        <div class="signature-line-container">
+                            <span class="signature-sub-label">({{ labels.signature }}, {{ labels.name_surname }})</span>
+                            <span class="signature-sub-label">{{ labels.date_label }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Buyer (Received by) -->
+                    <div class="signature-box">
+                        <div class="signature-label">{{ labels.received_by }}</div>
+                        <div style="height: 20px;"></div>
+                        <div style="height: 40px;"></div>
+                        <div class="signature-line-container">
+                            <span class="signature-sub-label">({{ labels.signature }}, {{ labels.name_surname }})</span>
+                            <span class="signature-sub-label">{{ labels.date_label }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function downloadPDF() {
+            {% if invoice.id %}
+            const invoiceId = {{ invoice.id }};
+            const lang = '{{ lang }}';
+                let baseUrl = window.location.origin;
+                
+                if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                    baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                }
+                
+                const pdfUrl = `${baseUrl}/api/invoices/sales/${invoiceId}/pdf/?lang=${lang}`;
+                
+                fetch(pdfUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
+                    },
+                    credentials: 'include'
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('HTTP error! status: ' + response.status);
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    blob.arrayBuffer().then(buffer => {
+                        const uint8Array = new Uint8Array(buffer);
+                        if (uint8Array[0] === 0x25 && uint8Array[1] === 0x50 && uint8Array[2] === 0x44 && uint8Array[3] === 0x46) {
+                            downloadBlob(blob, 'saskaita_{{ invoice.invoice_number|slugify|default:invoice.id }}.pdf');
+                        } else {
+                            blob.text().then(text => {
+                                console.error('Gautas ne PDF:', text.substring(0, 200));
+                                showToast('Klaida: gautas failas nėra PDF formatas.', 'error');
+                            });
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Klaida atsisiunčiant PDF:', error);
+                    showToast('Klaida atsisiunčiant PDF: ' + error.message, 'error');
+                });
+            {% endif %}
+        }
+        
+        function downloadBlob(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }
+        
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            if (!container) return null;
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icons = {
+                success: '✅',
+                error: '❌',
+                info: 'ℹ️'
+            };
+            
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" onclick="this.parentElement.remove(); checkToastContainer();">×</button>
+            `;
+            
+            container.style.display = 'block';
+            container.appendChild(toast);
+            
+            const timeout = (type === 'success' || type === 'error') ? 5000 : 3000;
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    toast.remove();
+                    checkToastContainer();
+                }, 300);
+            }, timeout);
+            
+            return toast;
+        }
+        
+        function checkToastContainer() {
+            const container = document.getElementById('toastContainer');
+            if (container && container.children.length === 0) {
+                container.style.display = 'none';
+            }
+        }
+        
+        async function showEmailPrompt(partnerId) {
+            return new Promise(async (resolve) => {
+                let contacts = [];
+                if (partnerId) {
+                    try {
+                        const token = localStorage.getItem('token') || '';
+                        let baseUrl = window.location.origin;
+                        if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                            baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                        }
+                        const response = await fetch(`${baseUrl}/api/partners/contacts/?partner=${partnerId}`, {
+                            headers: {
+                                'Authorization': 'Bearer ' + token
+                            },
+                            credentials: 'include'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            contacts = data.results || data || [];
+                        }
+                    } catch (error) {
+                        console.error('Klaida užkraunant kontaktus:', error);
+                    }
+                }
+                
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                    background: rgba(0, 0, 0, 0.5); display: flex;
+                    align-items: center; justify-content: center; z-index: 10001;
+                `;
+                
+                const dialog = document.createElement('div');
+                dialog.style.cssText = `
+                    background: white; padding: 24px; border-radius: 8px;
+                    min-width: 500px; max-width: 700px; max-height: 80vh;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    display: flex; flex-direction: column;
+                `;
+                
+                const selectedEmails = new Map();
+                const editingEmails = new Set();
+                let showNewContactForm = false;
+                
+                const close = () => { document.body.removeChild(modal); };
+                
+                const updateModal = () => {
+                    let html = `<h3 style="margin: 0 0 16px 0; font-size: 18px;">Siųsti sąskaitą el. paštu</h3>
+                                <div id="contactsContainer" style="flex: 1; overflow-y: auto; margin-bottom: 16px; max-height: 400px;">`;
+                    
+                    contacts.forEach(contact => {
+                        const email = selectedEmails.get(contact.id) || contact.email || '';
+                        const isChecked = selectedEmails.has(contact.id);
+                        const isEditing = editingEmails.has(contact.id);
+                        const escapedEmail = (email || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        html += `
+                            <div style="border: 1px solid #ddd; border-radius: 3px; padding: 6px 8px; margin-bottom: 4px; background: ${isChecked ? '#f0f8ff' : '#fff'};">
+                                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;">
+                                    <input type="checkbox" id="contact_${contact.id}" ${isChecked ? 'checked' : ''} 
+                                           style="cursor: pointer; margin: 0; flex-shrink: 0;" 
+                                           data-contact-id="${contact.id}"
+                                           data-default-email="${escapedEmail}">
+                                    <label for="contact_${contact.id}" style="cursor: pointer; margin: 0; font-size: 12px; flex-shrink: 0; white-space: nowrap;">
+                                        <strong style="font-size: 12px;">${((contact.first_name || '') + ' ' + (contact.last_name || '')).trim() || 'Kontaktinis asmuo'}</strong>
+                                        ${contact.position ? `<span style="font-size: 11px; color: #666; margin-left: 4px;">• ${contact.position}</span>` : ''}
+                                    </label>
+                                    <span style="color: #ccc; margin: 0 4px; flex-shrink: 0;">|</span>
+                                    ${isEditing ? `
+                                        <input type="email" id="email_${contact.id}" value="${escapedEmail}" style="flex: 1; min-width: 150px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;" data-contact-id="${contact.id}">
+                                        <button type="button" id="saveEmail_${contact.id}" data-contact-id="${contact.id}" style="padding: 4px 8px; border: none; background: #28a745; color: white; border-radius: 3px; cursor: pointer; font-size: 11px;">✓</button>
+                                    ` : `
+                                        <div style="flex: 1; min-width: 150px; padding: 2px 0; font-size: 11px; color: ${email ? '#333' : '#999'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${email || 'Nėra el. pašto'}</div>
+                                        <button type="button" id="editEmail_${contact.id}" data-contact-id="${contact.id}" style="padding: 4px 8px; border: 1px solid #ddd; background: white; border-radius: 3px; cursor: pointer; font-size: 11px;">✏️</button>
+                                    `}
+                                </div>
+                            </div>`;
+                    });
+                    
+                    html += `<div style="margin-top: 8px;">
+                                ${!showNewContactForm ? `
+                                    <button type="button" id="showNewContactBtn" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px dashed #ddd; background: #f9f9f9; border-radius: 3px; cursor: pointer; font-size: 12px; color: #666;">
+                                        <span style="font-size: 16px;">+</span><span>Pridėti naują kontaktą</span>
+                                    </button>` : `
+                                    <div style="border: 1px solid #ddd; border-radius: 3px; padding: 8px; background: #f9f9f9;">
+                                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                                            <input type="text" id="newFirstName" placeholder="Vardas" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;">
+                                            <input type="text" id="newLastName" placeholder="Pavardė" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;">
+                                        </div>
+                                        <div style="display: flex; align-items: center; gap: 6px;">
+                                            <input type="email" id="newEmail" placeholder="El. pašto adresas" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px;">
+                                            <input type="checkbox" id="newEmailCheck" style="cursor: pointer; flex-shrink: 0;"><label for="newEmailCheck" style="cursor: pointer; font-size: 11px; white-space: nowrap;">Siųsti</label>
+                                            <button type="button" id="hideNewContactBtn" style="padding: 4px 8px; border: 1px solid #ddd; background: white; border-radius: 3px; cursor: pointer; font-size: 11px;">✕</button>
+                                        </div>
+                                    </div>`}
+                             </div></div>
+                             <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #eee; padding-top: 16px;">
+                                <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; font-size: 14px;">Atšaukti</button>
+                                <button id="sendBtn" style="padding: 8px 16px; border: none; background: #28a745; color: white; border-radius: 4px; cursor: pointer; font-size: 14px;">Siųsti</button>
+                             </div>`;
+                    
+                    dialog.innerHTML = html;
+                    
+                    dialog.querySelectorAll('input[type="checkbox"][data-contact-id]').forEach(checkbox => {
+                        const contactId = parseInt(checkbox.getAttribute('data-contact-id'));
+                        const defaultEmail = checkbox.getAttribute('data-default-email') || '';
+                        checkbox.addEventListener('change', () => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            if (checkbox.checked) { selectedEmails.set(contactId, emailInput ? emailInput.value.trim() : defaultEmail); }
+                            else { selectedEmails.delete(contactId); }
+                            updateModal();
+                        });
+                    });
+                    
+                    dialog.querySelectorAll('button[id^="editEmail_"]').forEach(btn => {
+                        const contactId = parseInt(btn.getAttribute('data-contact-id'));
+                        btn.addEventListener('click', () => { editingEmails.add(contactId); updateModal(); });
+                    });
+                    
+                    dialog.querySelectorAll('button[id^="saveEmail_"]').forEach(btn => {
+                        const contactId = parseInt(btn.getAttribute('data-contact-id'));
+                        btn.addEventListener('click', () => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            const newEmail = emailInput ? emailInput.value.trim() : '';
+                            if (newEmail) selectedEmails.set(contactId, newEmail);
+                            editingEmails.delete(contactId); updateModal();
+                        });
+                    });
+                    
+                    const showNewContactBtn = dialog.querySelector('#showNewContactBtn');
+                    if (showNewContactBtn) showNewContactBtn.addEventListener('click', () => { showNewContactForm = true; updateModal(); });
+                    const hideNewContactBtn = dialog.querySelector('#hideNewContactBtn');
+                    if (hideNewContactBtn) hideNewContactBtn.addEventListener('click', () => { showNewContactForm = false; updateModal(); });
+                    
+                    const cancelBtn = dialog.querySelector('#cancelBtn');
+                    const sendBtn = dialog.querySelector('#sendBtn');
+                    if (cancelBtn) cancelBtn.onclick = () => { close(); resolve(null); };
+                    if (sendBtn) sendBtn.onclick = () => {
+                        const emails = []; const contactsToAdd = [];
+                        selectedEmails.forEach((email, contactId) => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            const finalEmail = (emailInput ? emailInput.value.trim() : email.trim()) || email.trim();
+                            if (finalEmail) emails.push(finalEmail);
+                        });
+                        const newEmailCheck = document.getElementById('newEmailCheck');
+                        const newEmail = document.getElementById('newEmail');
+                        if (newEmailCheck && newEmailCheck.checked && newEmail && newEmail.value.trim()) {
+                            emails.push(newEmail.value.trim());
+                            contactsToAdd.push({
+                                email: newEmail.value.trim(),
+                                first_name: (document.getElementById('newFirstName')?.value || '').trim(),
+                                last_name: (document.getElementById('newLastName')?.value || '').trim()
+                            });
+                        }
+                        if (emails.length === 0) { showToast('Pasirinkite bent vieną el. pašto adresą', 'error'); return; }
+                        close(); resolve({ emails, contactsToAdd, partnerId });
+                    };
+                };
+                updateModal(); modal.appendChild(dialog); document.body.appendChild(modal);
+            });
+        }
+        
+        async function sendEmail() {
+            {% if invoice.id %}
+            const invoiceId = {{ invoice.id }};
+            const lang = '{{ lang }}';
+            const partnerId = {% if invoice.partner %}{{ invoice.partner.id }}{% else %}null{% endif %};
+                const result = await showEmailPrompt(partnerId);
+                
+                if (!result || !result.emails || result.emails.length === 0) return;
+                
+                const loadingToast = showToast('Siunčiama...', 'info');
+                
+                try {
+                    let baseUrl = window.location.origin;
+                    if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                        baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                    }
+                    const response = await fetch(`${baseUrl}/api/invoices/sales/${invoiceId}/send_email/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
+                    },
+                        credentials: 'include',
+                    body: JSON.stringify({
+                            emails: result.emails,
+                            contacts_to_add: result.contactsToAdd || [],
+                        lang: lang
+                    })
+                });
+                    
+                    if (loadingToast) loadingToast.remove();
+                    
+                const data = await response.json();
+                    if (data.success) {
+                        showToast('El. laiškas sėkmingai išsiųstas!', 'success');
+                    } else {
+                        showToast(data.error || 'Klaida siunčiant el. laišką', 'error');
+                    }
+                } catch (error) {
+                    if (loadingToast) loadingToast.remove();
+                    showToast('Klaida siunčiant el. laišką: ' + error.message, 'error');
+            }
+            {% endif %}
+        }
+    </script>
+</body>
+</html>

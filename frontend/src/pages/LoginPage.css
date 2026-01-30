@@ -1,0 +1,49 @@
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.login-card {
+  background: white;
+  padding: 40px;
+  border-radius: 8px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-logo-container {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 40px;
+}
+
+.login-logo {
+  max-height: 200px;
+  max-width: 90%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.login-card h1 {
+  margin-bottom: 30px;
+  text-align: center;
+  color: #333;
+}
+
+.error-message {
+  background-color: #f8d7da;
+  color: #721c24;
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+  border: 1px solid #f5c6cb;
+  white-space: pre-line; /* Leidžia rodyti \n kaip naują eilutę */
+  line-height: 1.5;
+  font-size: 14px;
+}
+

@@ -1,0 +1,1153 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <title>{{ labels.carrier }} {{ carrier.partner.name }} - {{ order.order_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        
+        html, body {
+            background-color: #FFFFFF;
+            margin: 0;
+            padding: 0;
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 10px;
+            color: #000;
+        }
+        
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            background: #fff;
+            position: relative;
+            padding: 8mm;
+            margin: 0 auto;
+            box-sizing: border-box;
+        }
+        
+        /* Company logo and header - side by side */
+        .header-container {
+            display: table;
+            width: 100%;
+            margin-bottom: 10px;
+            border-bottom: 2px solid #000;
+            padding-bottom: 5px;
+            padding-left: 8%;
+            padding-right: 8%;
+            box-sizing: border-box;
+        }
+        
+        .company-logo {
+            display: table-cell;
+            vertical-align: middle;
+            width: 35%;
+            padding-right: 15px;
+        }
+        
+        .company-logo img {
+            max-width: 150px;
+            max-height: 80px;
+        }
+        
+        /* Contract header */
+        .contract-header {
+            display: table-cell;
+            vertical-align: middle;
+            text-align: right;
+            width: 65%;
+        }
+        
+        .contract-title {
+            font-size: 12px;
+            font-weight: bold;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .contract-number {
+            font-size: 10px;
+            font-weight: bold;
+            margin-top: 5px;
+            line-height: 1.6;
+        }
+        
+        /* Sections */
+        .section {
+            margin-bottom: 6px;
+            padding-bottom: 3px;
+        }
+        
+        .section-title {
+            font-weight: bold;
+            font-size: 10px;
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 2px;
+        }
+        
+        .info-row {
+            margin-bottom: 2px;
+            line-height: 1.3;
+            font-size: 10px;
+        }
+        
+        .info-row-compact {
+            margin-bottom: 1px;
+            line-height: 1.2;
+            font-size: 9px;
+        }
+        
+        .info-row strong {
+            font-weight: bold;
+        }
+        
+        /* Two columns layout */
+        .two-columns {
+            display: table;
+            width: 100%;
+            margin-top: 5px;
+        }
+        
+        .column {
+            display: table-cell;
+            vertical-align: top;
+            width: 50%;
+            padding-right: 12px;
+        }
+        
+        .column:last-child {
+            padding-right: 0;
+            padding-left: 12px;
+        }
+        
+        /* Terms section */
+        .terms-section {
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+        
+        .terms-title {
+            font-weight: bold;
+            font-size: 9px;
+            margin-top: 4px;
+            margin-bottom: 3px;
+            text-transform: uppercase;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 1px;
+        }
+        
+        .terms-list {
+            margin-left: 0;
+            margin-bottom: 5px;
+        }
+        
+        .terms-list ol {
+            margin: 0;
+            padding-left: 18px;
+        }
+        
+        .terms-list li {
+            margin-bottom: 2px;
+            text-align: justify;
+            line-height: 1.3;
+            font-size: 8px;
+        }
+        
+        /* Signatures */
+        .signatures {
+            margin-top: 8px;
+            padding-top: 6px;
+            display: table;
+            width: 100%;
+            border-top: 1px solid #ccc;
+        }
+        
+        .signature-box {
+            display: table-cell;
+            width: 50%;
+            padding: 8px;
+            vertical-align: bottom;
+            position: relative;
+        }
+        
+        .signature-line {
+            border-top: 1px solid #000;
+            margin-top: 0px;
+            padding-top: 2px;
+            text-align: center;
+            font-size: 8px;
+            position: absolute;
+            bottom: 0;
+            left: 8px;
+            right: 8px;
+        }
+        
+        /* Price section - highlighted */
+        .price-section {
+            background-color: #f5f5f5;
+            padding: 8px;
+            border: 1px solid #ddd;
+            margin: 8px 0;
+            border-radius: 3px;
+        }
+        
+        .price-row {
+            font-size: 10px;
+            font-weight: bold;
+            margin-bottom: 3px;
+        }
+        
+        /* Cargo details */
+        .cargo-details {
+            background-color: #fafafa;
+            padding: 6px;
+            border-left: 3px solid #333;
+            margin: 5px 0;
+        }
+        
+        /* Route details */
+        .route-section {
+            display: table;
+            width: 100%;
+        }
+        
+        .route-item {
+            display: table-cell;
+            width: 50%;
+            padding-right: 8px;
+        }
+        
+        .route-item:last-child {
+            padding-right: 0;
+            padding-left: 8px;
+        }
+        
+        /* Action buttons - visible only on screen, hidden when printing */
+        .action-buttons {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+        
+        .action-button:hover {
+            background-color: #0056b3;
+        }
+        
+        .action-button.email {
+            background-color: #28a745;
+        }
+        
+        .action-button.email:hover {
+            background-color: #218838;
+        }
+        
+        @media print {
+            .action-buttons {
+                display: none !important;
+            }
+        }
+        
+        /* Toast notification */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: none;
+        }
+        
+        .toast {
+            min-width: 300px;
+            max-width: 500px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            margin-bottom: 12px;
+            animation: slideIn 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .toast.success {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            color: #155724;
+        }
+        
+        .toast.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+        
+        .toast.info {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            color: #0c5460;
+        }
+        
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        
+        .toast-message {
+            flex: 1;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .toast-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: inherit;
+            opacity: 0.6;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .toast-close:hover {
+            opacity: 1;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @media print {
+            .toast-container {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Toast notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <div class="page">
+        <!-- Action buttons - visible only on screen, hidden when printing -->
+        <div class="action-buttons" id="actionButtons">
+            <button onclick="downloadPDF()" class="action-button">PDF</button>
+            <button onclick="sendEmail()" class="action-button email">El. paštas</button>
+        </div>
+
+        <script>
+            // Paslėpti mygtukus, jei rodoma per iframe (modaliniame lange)
+            if (window.self !== window.top) {
+                document.getElementById('actionButtons').style.display = 'none';
+            }
+        </script>
+
+        <!-- Company Logo and Contract Header -->
+        <div class="header-container">
+            <div class="company-logo">
+                {% if company and company.logo %}
+                    <img src="{{ company.logo.url }}" alt="{{ company.name }}" />
+                {% endif %}
+            </div>
+            <div class="contract-header">
+                <div class="contract-title">
+                    {{ labels.contract_title }}
+                </div>
+                <div class="contract-number">
+                    {{ labels.number }} {{ order.order_number|default:"-" }}{% if carrier.expedition_number %} / {{ carrier.expedition_number }}{% endif %}<br>
+                    {% if order.order_date %}
+                        {{ labels.date }}: {{ order.order_date|date:"Y.m.d" }}
+                    {% elif order.created_at %}
+                        {{ labels.date }}: {{ order.created_at|date:"Y.m.d" }}
+                    {% else %}
+                        {{ labels.date }}: -
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Parties -->
+        <div class="section">
+            <div class="info-row" style="text-align: center; margin-bottom: 8px;">
+                {{ labels.parties_between }} {% if company %}<strong>{{ company.name }}</strong>{% else %}<strong>Įmonė</strong>{% endif %}, 
+                {{ labels.parties_and }} <strong>{{ carrier.partner.name }}</strong>
+            </div>
+        </div>
+        
+        <!-- Užsakovas ir Vežėjas - dvi kolonos -->
+        <div class="section">
+            <div class="two-columns">
+                <div class="column">
+                    <div class="section-title">{{ labels.customer }}:</div>
+                    {% if company %}
+                        <div class="info-row-compact"><strong>{{ company.name }}</strong></div>
+                        {% if company.code %}<div class="info-row-compact">{{ labels.code }}: {{ company.code }}</div>{% endif %}
+                        {% if company.vat_code %}<div class="info-row-compact">{{ labels.vat_code }}: {{ company.vat_code }}</div>{% endif %}
+                        {% if company.address %}
+                            <div class="info-row-compact">{{ labels.address }}: {{ company.address }}{% if company.city %}, {{ company.city }}{% endif %}{% if company.postal_code %} {{ company.postal_code }}{% endif %}</div>
+                        {% endif %}
+                        {% if company.correspondence_address %}
+                            <div class="info-row-compact">{{ labels.correspondence }}: {{ company.correspondence_address }}</div>
+                        {% endif %}
+                        {% if company.phone or company.email %}
+                            <div class="info-row-compact">
+                                {% if company.phone %}{{ labels.phone }}: {{ company.phone }}{% endif %}
+                                {% if company.phone and company.email %} | {% endif %}
+                                {% if company.email %}{{ company.email }}{% endif %}
+                            </div>
+                        {% endif %}
+                        {% if company.bank_name %}<div class="info-row-compact">{{ labels.bank }}: {{ company.bank_name }}</div>{% endif %}
+                        {% if company.bank_account %}<div class="info-row-compact">{{ labels.account }}: {{ company.bank_account }}</div>{% endif %}
+                        {% if company.bank_code %}<div class="info-row-compact">{{ labels.code }}: {{ company.bank_code }}</div>{% endif %}
+                    {% else %}
+                        <div class="info-row-compact">Įmonės informacija nepaskirta</div>
+                    {% endif %}
+                </div>
+                <div class="column">
+                    <div class="section-title">{{ labels.carrier }}:</div>
+                    <div class="info-row"><strong>{{ carrier.partner.name }}</strong></div>
+                    {% if carrier.partner.code %}<div class="info-row">{{ labels.code }}: {{ carrier.partner.code }}</div>{% endif %}
+                    {% if carrier.partner.vat_code %}<div class="info-row">{{ labels.vat_code }}: {{ carrier.partner.vat_code }}</div>{% endif %}
+                    {% if carrier.partner.address %}
+                        <div class="info-row">{{ labels.address }}: {{ carrier.partner.address }}{% if carrier.partner.city %}, {{ carrier.partner.city }}{% endif %}{% if carrier.partner.postal_code %} {{ carrier.partner.postal_code }}{% endif %}</div>
+                    {% endif %}
+                    {% if carrier.partner.correspondence_address %}
+                        <div class="info-row">{{ labels.correspondence }}: {{ carrier.partner.correspondence_address }}</div>
+                    {% endif %}
+                    {% if carrier.partner.contact_person %}
+                        <div class="info-row">
+                            {% if carrier.partner.contact_person.phone %}{{ labels.phone }}: {{ carrier.partner.contact_person.phone }}{% endif %}
+                            {% if carrier.partner.contact_person.phone and carrier.partner.contact_person.email %} | {% endif %}
+                            {% if carrier.partner.contact_person.email %}{{ carrier.partner.contact_person.email }}{% endif %}
+                        </div>
+                    {% endif %}
+                    {% if carrier.partner.bank_name %}<div class="info-row">{{ labels.bank }}: {{ carrier.partner.bank_name }}</div>{% endif %}
+                    {% if carrier.partner.bank_account %}<div class="info-row">{{ labels.account }}: {{ carrier.partner.bank_account }}</div>{% endif %}
+                    {% if carrier.partner.bank_code %}<div class="info-row">{{ labels.code }}: {{ carrier.partner.bank_code }}</div>{% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- Krovinys -->
+        <div class="section">
+            <div class="section-title" style="text-align: center;">{{ labels.cargo }}</div>
+            <div class="cargo-details">
+                {% if order.cargo_items.all %}
+                    {% for cargo in order.cargo_items.all %}
+                    <div style="margin-bottom: 4px; {% if not forloop.last %}padding-bottom: 4px; border-bottom: 1px solid #ddd;{% endif %}">
+                        {% if cargo.loading_stop %}
+                            <div style="color: #28a745; font-weight: bold; font-size: 9px; margin-bottom: 1px;">
+                                🛫 {{ labels.loading_label|default:"PAKROVIMAS" }} #{{ cargo.loading_stop.sequence_order|add:1 }}: {{ cargo.loading_stop.city }}{% if cargo.loading_stop.country %}, {{ cargo.loading_stop.country }}{% endif %}
+                            </div>
+                        {% endif %}
+                        {% if cargo.unloading_stop %}
+                            <div style="color: #dc3545; font-weight: bold; font-size: 9px; margin-bottom: 2px;">
+                                🛬 {{ labels.unloading_label|default:"IŠKROVIMAS" }} #{{ cargo.unloading_stop.sequence_order|add:1 }}: {{ cargo.unloading_stop.city }}{% if cargo.unloading_stop.country %}, {{ cargo.unloading_stop.country }}{% endif %}
+                            </div>
+                        {% endif %}
+                        <div style="font-size: 8px; line-height: 1.3;">
+                            {% if cargo.reference_number %}<strong>REF:</strong> {{ cargo.reference_number }} | {% endif %}
+                            {% if cargo.description_display or labels.cargo_default %}<strong>{{ labels.description }}</strong> {{ cargo.description_display }} | {% endif %}
+                            {% if cargo.pallet_count or cargo.package_count or cargo.units %}
+                                <strong>{{ labels.quantity }}</strong>
+                                {% if cargo.pallet_count %}{{ cargo.pallet_count }} {{ labels.pallet_count|default:"pal." }}{% endif %}
+                                {% if cargo.pallet_count and cargo.package_count %} / {% endif %}
+                                {% if cargo.package_count %}{{ cargo.package_count }} {{ labels.package_count|default:"pak." }}{% endif %}
+                                {% if cargo.units %}{% if cargo.pallet_count or cargo.package_count %} ({{ cargo.units_display }}){% else %}{{ cargo.units_display }}{% endif %}{% endif %} | 
+                            {% endif %}
+                            {% if cargo.vehicle_type %}<strong>{{ labels.type }}</strong> {{ cargo.vehicle_type }} | {% endif %}
+                            {% if cargo.type_display %}<strong>{{ labels.type }}</strong> {{ cargo.type_display }}{% if cargo.is_palletized and cargo.is_stackable %}, {{ labels.stackable }}{% endif %} | {% endif %}
+                            {% if cargo.weight_display %}<strong>{{ labels.weight }}</strong> {{ cargo.weight_display }} | {% endif %}
+                            {% if cargo.ldm %}<strong>{{ labels.ldm }}</strong> {{ cargo.ldm|floatformat:2 }} | {% endif %}
+                        {% if cargo.length_m or cargo.width_m or cargo.height_m %}
+                            <strong>{{ labels.dimensions }}</strong> 
+                                {{ cargo.length_m|default:0|floatformat:2 }}m × 
+                                {{ cargo.width_m|default:0|floatformat:2 }}m × 
+                                {{ cargo.height_m|default:0|floatformat:2 }}m
+                        {% endif %}
+                        </div>
+                        {% if cargo.special_requirements_display or cargo.notes %}
+                            <div style="font-size: 8px; line-height: 1.3; margin-top: 1px;">
+                                {% if cargo.special_requirements_display %}<strong>{{ labels.special_requirements }}</strong> {{ cargo.special_requirements_display }}{% endif %}
+                                {% if cargo.special_requirements_display and cargo.notes %} | {% endif %}
+                                {% if cargo.notes %}<strong>{{ labels.notes }}</strong> {{ cargo.notes }}{% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="info-row">
+                        {% if order.is_partial %}<strong>{{ labels.type }}</strong> {{ labels.partial_cargo }}<br>{% endif %}
+                        {% if order.weight_kg %}<strong>{{ labels.weight }}</strong> {{ order.weight_kg|floatformat:1 }} t.<br>{% endif %}
+                        {% if order.length_m or order.width_m or order.height_m %}
+                            <strong>{{ labels.dimensions }}</strong> 
+                            {% if order.length_m %}{{ order.length_m|floatformat:2 }}{% endif %}m × 
+                            {% if order.width_m %}{{ order.width_m|floatformat:2 }}{% endif %}m × 
+                            {% if order.height_m %}{{ order.height_m|floatformat:2 }}{% endif %}m<br>
+                        {% endif %}
+                        {% if order.ldm %}<strong>{{ labels.ldm }}</strong> {{ order.ldm|floatformat:1 }}{% endif %}
+                    </div>
+                {% endif %}
+            </div>
+            {% if order.notes %}
+            <div class="info-row" style="margin-top: 5px;"><strong>{{ labels.notes }}</strong> {{ order.notes }}</div>
+            {% endif %}
+        </div>
+        
+        <!-- Route Information with Dates -->
+        <div class="section">
+            {% if order.route_stops.exists %}
+                <div class="section-title" style="text-align: center;">{{ labels.route_title|default:"MARŠRUTAS" }}</div>
+                <div style="display: table; width: 100%; border-collapse: collapse;">
+                    {% for stop in order.route_stops.all %}
+                        <div style="display: table-row; border-bottom: 1px solid #eee;">
+                            <div style="display: table-cell; padding: 4px; width: 25%; vertical-align: top; font-weight: bold; color: {% if stop.stop_type == 'loading' %}#28a745{% else %}#dc3545{% endif %};">
+                                {% if stop.stop_type == 'loading' %}{{ labels.loading_label|default:"PAKROVIMAS" }}{% else %}{{ labels.unloading_label|default:"IŠKROVIMAS" }}{% endif %} #{{ forloop.counter }}
+                            </div>
+                            <div style="display: table-cell; padding: 4px; width: 45%; vertical-align: top;">
+                                <strong>{{ stop.city }}, {{ stop.country }}</strong><br>
+                                {{ stop.address }}{% if stop.name %} ({{ stop.name }}){% endif %}
+                            </div>
+                            <div style="display: table-cell; padding: 4px; width: 30%; vertical-align: top; text-align: right;">
+                                📅 {% if stop.date_from %}
+                                    {% if stop.date_from|date:"H:i" != "00:00" %}
+                                        {{ stop.date_from|date:"Y.m.d" }} / {{ stop.date_from|date:"H:i" }}
+                                    {% else %}
+                                        {{ stop.date_from|date:"Y.m.d" }}
+                                    {% endif %}
+                                {% endif %}
+                                {% if stop.date_to and stop.date_to != stop.date_from %}
+                                    {% if stop.date_from %} - {% endif %}
+                                    {% if stop.date_to|date:"H:i" != "00:00" %}
+                                        {{ stop.date_to|date:"Y.m.d" }} / {{ stop.date_to|date:"H:i" }}
+                                    {% else %}
+                                        {{ stop.date_to|date:"Y.m.d" }}
+                                    {% endif %}
+                                {% endif %}
+                                {% if stop.notes %}<br><small style="color: #666;">{{ stop.notes }}</small>{% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+            <div class="two-columns">
+                <div class="column">
+                    <div class="section-title" style="font-size: 9px; margin-bottom: 3px;">{{ labels.route_from_title }}</div>
+                    <div class="info-row">
+                        {% if order.sender_route_from %}
+                            <strong>{{ labels.sender }}</strong> {{ order.sender_route_from }}<br>
+                        {% endif %}
+                        {% if carrier.route_from %}
+                            {{ carrier.route_from }}
+                        {% else %}
+                            {% if order.route_from_address %}{{ order.route_from_address }}{% endif %}
+                            {% if order.route_from_postal_code or order.route_from_city %}
+                                {% if order.route_from_address %}<br>{% endif %}
+                                {% if order.route_from_postal_code %}{{ order.route_from_postal_code }}{% endif %}{% if order.route_from_postal_code and order.route_from_city %} {% endif %}
+                                {% if order.route_from_city %}{{ order.route_from_city }}{% endif %}
+                            {% endif %}
+                            {% if order.route_from_country %}
+                                {% if order.route_from_address or order.route_from_postal_code or order.route_from_city %}<br>{% endif %}
+                                {{ order.route_from_country }}
+                            {% endif %}
+                        {% endif %}
+                        {% if carrier.loading_date_from or carrier.loading_date or order.loading_date_from or order.loading_date %}
+                            {% if carrier.route_from or order.route_from_address or order.route_from_city or order.route_from_postal_code or order.route_from_country %}<br>{% endif %}
+                            <strong>{{ labels.loading_date }}</strong>
+                            {% if carrier.loading_date_from %}
+                                {% if carrier.loading_date_to and carrier.loading_date_from != carrier.loading_date_to %}
+                                    {{ carrier.loading_date_from|date:"Y.m.d" }} - {{ carrier.loading_date_to|date:"Y.m.d" }}
+                                {% else %}
+                                    {{ carrier.loading_date_from|date:"Y.m.d" }}
+                                {% endif %}
+                            {% elif carrier.loading_date %}
+                                {{ carrier.loading_date|date:"Y.m.d" }}
+                                {% if carrier.loading_date|date:"H:i" != "00:00" %}
+                                    {{ carrier.loading_date|date:"H:i" }}
+                                {% endif %}
+                            {% elif order.loading_date_from %}
+                                {% if order.loading_date_to and order.loading_date_from != order.loading_date_to %}
+                                    {{ order.loading_date_from|date:"Y.m.d" }} - {{ order.loading_date_to|date:"Y.m.d" }}
+                                {% else %}
+                                    {{ order.loading_date_from|date:"Y.m.d" }}
+                                {% endif %}
+                            {% elif order.loading_date %}
+                                {{ order.loading_date|date:"Y.m.d" }}
+                                {% if order.loading_date|date:"H:i" != "00:00" %}
+                                    {{ order.loading_date|date:"H:i" }}
+                                {% endif %}
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="column">
+                    <div class="section-title" style="font-size: 9px; margin-bottom: 3px;">{{ labels.route_to_title }}</div>
+                    <div class="info-row">
+                        {% if order.receiver_route_to %}
+                            <strong>{{ labels.receiver }}</strong> {{ order.receiver_route_to }}<br>
+                        {% endif %}
+                        {% if carrier.route_to %}
+                            {{ carrier.route_to }}
+                        {% else %}
+                            {% if order.route_to_address %}{{ order.route_to_address }}{% endif %}
+                            {% if order.route_to_postal_code or order.route_to_city %}
+                                {% if order.route_to_address %}<br>{% endif %}
+                                {% if order.route_to_postal_code %}{{ order.route_to_postal_code }}{% endif %}{% if order.route_to_postal_code and order.route_to_city %} {% endif %}
+                                {% if order.route_to_city %}{{ order.route_to_city }}{% endif %}
+                            {% endif %}
+                            {% if order.route_to_country %}
+                                {% if order.route_to_address or order.route_to_postal_code or order.route_to_city %}<br>{% endif %}
+                                {{ order.route_to_country }}
+                            {% endif %}
+                        {% endif %}
+                        {% if carrier.unloading_date_from or carrier.unloading_date or order.unloading_date_from or order.unloading_date %}
+                            {% if carrier.route_to or order.route_to_address or order.route_to_city or order.route_to_postal_code or order.route_to_country %}<br>{% endif %}
+                            <strong>{{ labels.unloading_date }}</strong>
+                            {% if carrier.unloading_date_from %}
+                                {% if carrier.unloading_date_to and carrier.unloading_date_from != carrier.unloading_date_to %}
+                                    {{ carrier.unloading_date_from|date:"Y.m.d" }} - {{ carrier.unloading_date_to|date:"Y.m.d" }}
+                                {% else %}
+                                    {{ carrier.unloading_date_from|date:"Y.m.d" }}
+                                {% endif %}
+                            {% elif carrier.unloading_date %}
+                                {{ carrier.unloading_date|date:"Y.m.d" }}
+                                {% if carrier.unloading_date|date:"H:i" != "00:00" %}
+                                    {{ carrier.unloading_date|date:"H:i" }}
+                                {% endif %}
+                            {% elif order.unloading_date_from %}
+                                {% if order.unloading_date_to and order.unloading_date_from != order.unloading_date_to %}
+                                    {{ order.unloading_date_from|date:"Y.m.d" }} - {{ order.unloading_date_to|date:"Y.m.d" }}
+                                {% else %}
+                                    {{ order.unloading_date_from|date:"Y.m.d" }}
+                                {% endif %}
+                            {% elif order.unloading_date %}
+                                {{ order.unloading_date|date:"Y.m.d" }}
+                                {% if order.unloading_date|date:"H:i" != "00:00" %}
+                                    {{ order.unloading_date|date:"H:i" }}
+                                {% endif %}
+                            {% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+        
+        <!-- Price Section -->
+        <div class="section">
+            <div class="price-section">
+                <div class="section-title" style="margin-bottom: 10px;">{{ labels.price_title }}</div>
+                <div class="price-row">
+                    {{ labels.price_net }} {{ price_net|floatformat:2 }} EUR
+                </div>
+                <div class="price-row">
+                    {% if vat_rate == 0 %}
+                        {{ labels.vat_zero }}<span style="font-weight: normal;">{% if vat_rate_article %}({{ vat_rate_article }}){% else %} {{ labels.vat_zero_text }}{% endif %}</span>
+                    {% else %}
+                        PVM ({{ vat_rate|floatformat:0 }}%{% if vat_rate_article %}<span style="font-weight: normal;"> - {{ vat_rate_article }}</span>{% endif %}): {{ vat_amount|floatformat:2 }} EUR
+                    {% endif %}
+                </div>
+                <div class="price-row" style="font-size: 11px; margin-top: 4px;">
+                    {{ labels.price_total }} {{ price_with_vat|floatformat:2 }} EUR
+                </div>
+                <div class="info-row" style="margin-top: 4px; font-style: italic; font-size: 9px;">
+                    ({{ amount_in_words }})
+                </div>
+            </div>
+        </div>
+        
+        <!-- Payment Terms -->
+        <div class="section">
+            <div class="section-title">{{ labels.payment_term_title }}</div>
+            <div class="info-row">
+                {% if carrier_payment_terms and carrier_payment_terms.strip %}
+                    {{ carrier_payment_terms }}
+                {% else %}
+                    {{ labels.default_payment_terms }}
+                {% endif %}
+            </div>
+        </div>
+        
+        <!-- Terms and Conditions -->
+        <div class="terms-section">
+            <div class="terms-title">{{ labels.rights_obligations_carrier }}</div>
+            <div class="terms-list">
+                <ol>
+                    {% for obligation in labels.default_carrier_obligations %}
+                        <li>{{ obligation }}</li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </div>
+        
+        <div class="terms-section">
+            <div class="terms-title">{{ labels.rights_obligations_customer }}</div>
+            <div class="terms-list">
+                <ol>
+                    {% for obligation in labels.default_customer_obligations %}
+                        <li>{{ obligation }}</li>
+                    {% endfor %}
+                </ol>
+            </div>
+        </div>
+        
+        <!-- Signatures -->
+        <div class="signatures">
+            <div class="signature-box">
+                {% if order.manager %}
+                    <div style="text-align: center; font-size: 11px; font-weight: bold; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; padding-bottom: 20px;">
+                        {% if order.manager.position %}<span>{{ order.manager.position }}</span>{% endif %}
+                        {% if order.manager.user_settings %}
+                            {% if order.manager.user_settings.first_name or order.manager.user_settings.last_name %}
+                                <span>{{ order.manager.user_settings.first_name }} {{ order.manager.user_settings.last_name }}</span>
+                            {% elif order.manager.first_name or order.manager.last_name %}
+                        <span>{{ order.manager.first_name }} {{ order.manager.last_name }}</span>
+                            {% endif %}
+                        {% elif order.manager.first_name or order.manager.last_name %}
+                            <span>{{ order.manager.first_name }} {{ order.manager.last_name }}</span>
+                        {% endif %}
+                        {% if order.manager.user_settings and order.manager.user_settings.signature_image %}
+                            <img src="{{ order.manager.user_settings.signature_image.url }}" alt="Parašas" style="max-height: 50px; max-width: 150px; display: inline-block;" />
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <div style="padding-bottom: 20px;"></div>
+                {% endif %}
+                <div class="signature-line">
+                    <span style="font-size: 9px;">{{ labels.signatures }}</span>
+                </div>
+            </div>
+            <div class="signature-box">
+                <div style="padding-bottom: 20px;"></div>
+                <div class="signature-line">
+                    <span style="font-size: 9px;">{{ labels.signatures }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        function downloadPDF() {
+            {% if carrier.id %}
+                const carrierId = {{ carrier.id }};
+                const lang = '{{ lang }}';
+                let baseUrl = window.location.origin;
+                
+                if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                    baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                }
+                
+                const pdfUrl = `${baseUrl}/api/orders/carriers/${carrierId}/pdf/?lang=${lang}`;
+                
+                fetch(pdfUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
+                    },
+                    credentials: 'include'
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('HTTP error! status: ' + response.status);
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    blob.arrayBuffer().then(buffer => {
+                        const uint8Array = new Uint8Array(buffer);
+                        if (uint8Array[0] === 0x25 && uint8Array[1] === 0x50 && uint8Array[2] === 0x44 && uint8Array[3] === 0x46) {
+                            downloadBlob(blob, 'vezejo_sutartis_{{ carrier.partner.name|slugify }}_{{ order.order_number|default:order.id }}.pdf');
+                        } else {
+                            blob.text().then(text => {
+                                console.error('Gautas ne PDF:', text.substring(0, 200));
+                                showToast('Klaida: gautas failas nėra PDF formatas. Patikrinkite backend log\'us.', 'error');
+                            });
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Klaida atsisiunčiant PDF:', error);
+                    showToast('Klaida atsisiunčiant PDF: ' + error.message, 'error');
+                });
+            {% endif %}
+        }
+        
+        function downloadBlob(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }
+        
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            if (!container) return null;
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icons = {
+                success: '✅',
+                error: '❌',
+                info: 'ℹ️'
+            };
+            
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" onclick="this.parentElement.remove(); checkToastContainer();">×</button>
+            `;
+            
+            container.style.display = 'block';
+            container.appendChild(toast);
+            
+            const timeout = (type === 'success' || type === 'error') ? 5000 : 3000;
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    toast.remove();
+                    checkToastContainer();
+                }, 300);
+            }, timeout);
+            
+            return toast;
+        }
+        
+        function checkToastContainer() {
+            const container = document.getElementById('toastContainer');
+            if (container && container.children.length === 0) {
+                container.style.display = 'none';
+            }
+        }
+        
+        async function showEmailPrompt(partnerId) {
+            return new Promise(async (resolve) => {
+                let contacts = [];
+                if (partnerId) {
+                    try {
+                        const token = localStorage.getItem('token') || '';
+                        let baseUrl = window.location.origin;
+                        if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                            baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                        }
+                        const response = await fetch(`${baseUrl}/api/partners/contacts/?partner=${partnerId}`, {
+                            headers: {
+                                'Authorization': 'Bearer ' + token
+                            },
+                            credentials: 'include'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            contacts = data.results || data || [];
+                        }
+                    } catch (error) {
+                        console.error('Klaida užkraunant kontaktus:', error);
+                    }
+                }
+                
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0, 0, 0, 0.5);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 10001;
+                `;
+                
+                const dialog = document.createElement('div');
+                dialog.style.cssText = `
+                    background: white;
+                    padding: 24px;
+                    border-radius: 8px;
+                    min-width: 500px;
+                    max-width: 700px;
+                    max-height: 80vh;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    display: flex;
+                    flex-direction: column;
+                `;
+                
+                const selectedEmails = new Map();
+                const editingEmails = new Set();
+                let showNewContactForm = false;
+                
+                const close = () => {
+                    document.body.removeChild(modal);
+                };
+                
+                const updateModal = () => {
+                    let html = `
+                        <h3 style="margin: 0 0 16px 0; font-size: 18px;">Siųsti el. paštu</h3>
+                        <div id="contactsContainer" style="flex: 1; overflow-y: auto; margin-bottom: 16px; max-height: 400px;">
+                    `;
+                    
+                    contacts.forEach(contact => {
+                        const email = selectedEmails.get(contact.id) || contact.email || '';
+                        const isChecked = selectedEmails.has(contact.id);
+                        const isEditing = editingEmails.has(contact.id);
+                        const escapedEmail = (email || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        html += `
+                            <div style="border: 1px solid #ddd; border-radius: 3px; padding: 6px 8px; margin-bottom: 4px; background: ${isChecked ? '#f0f8ff' : '#fff'};">
+                                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;">
+                                    <input type="checkbox" id="contact_${contact.id}" ${isChecked ? 'checked' : ''} 
+                                           style="cursor: pointer; margin: 0; flex-shrink: 0;" 
+                                           data-contact-id="${contact.id}"
+                                           data-default-email="${(contact.email || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}">
+                                    <label for="contact_${contact.id}" style="cursor: pointer; margin: 0; font-size: 12px; flex-shrink: 0; white-space: nowrap;">
+                                        <strong style="font-size: 12px;">${((contact.first_name || '') + ' ' + (contact.last_name || '')).trim() || 'Kontaktinis asmuo'}</strong>
+                                        ${contact.position ? `<span style="font-size: 11px; color: #666; margin-left: 4px;">• ${contact.position}</span>` : ''}
+                                    </label>
+                                    <span style="color: #ccc; margin: 0 4px; flex-shrink: 0;">|</span>
+                                    ${isEditing ? `
+                                        <input type="email" 
+                                               id="email_${contact.id}" 
+                                               value="${escapedEmail}" 
+                                               placeholder="El. pašto adresas"
+                                               style="flex: 1; min-width: 150px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;"
+                                               data-contact-id="${contact.id}">
+                                        <button type="button" 
+                                                id="saveEmail_${contact.id}"
+                                                data-contact-id="${contact.id}"
+                                                style="padding: 4px 8px; border: none; background: #28a745; color: white; border-radius: 3px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;">
+                                            ✓
+                                        </button>
+                                    ` : `
+                                        <div style="flex: 1; min-width: 150px; padding: 2px 0; font-size: 11px; color: ${email ? '#333' : '#999'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            ${email || 'Nėra el. pašto'}
+                                        </div>
+                                        <button type="button" 
+                                                id="editEmail_${contact.id}"
+                                                data-contact-id="${contact.id}"
+                                                style="padding: 4px 8px; border: 1px solid #ddd; background: white; border-radius: 3px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;"
+                                                title="Redaguoti email">
+                                            ✏️
+                                        </button>
+                                    `}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += `
+                        <div style="margin-top: 8px;">
+                            ${!showNewContactForm ? `
+                                <button type="button" id="showNewContactBtn" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px dashed #ddd; background: #f9f9f9; border-radius: 3px; cursor: pointer; font-size: 12px; color: #666;">
+                                    <span style="font-size: 16px;">+</span>
+                                    <span>Pridėti naują kontaktą</span>
+                                </button>
+                            ` : `
+                                <div style="border: 1px solid #ddd; border-radius: 3px; padding: 8px; background: #f9f9f9;">
+                                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                                        <input type="text" id="newFirstName" placeholder="Vardas" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;">
+                                        <input type="text" id="newLastName" placeholder="Pavardė" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;">
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <input type="email" id="newEmail" placeholder="El. pašto adresas" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;">
+                                        <input type="checkbox" id="newEmailCheck" style="cursor: pointer; flex-shrink: 0;">
+                                        <label for="newEmailCheck" style="cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;">Siųsti</label>
+                                        <button type="button" id="hideNewContactBtn" style="padding: 4px 8px; border: 1px solid #ddd; background: white; border-radius: 3px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;">✕</button>
+                                    </div>
+                                </div>
+                            `}
+                        </div>
+                    `;
+                    
+                    html += `</div>`;
+                    html += `
+                        <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #eee; padding-top: 16px;">
+                            <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; font-size: 14px;">Atšaukti</button>
+                            <button id="sendBtn" style="padding: 8px 16px; border: none; background: #28a745; color: white; border-radius: 4px; cursor: pointer; font-size: 14px;">Siųsti</button>
+                        </div>
+                    `;
+                    
+                    dialog.innerHTML = html;
+                    
+                    dialog.querySelectorAll('input[type="checkbox"][data-contact-id]').forEach(checkbox => {
+                        const contactId = parseInt(checkbox.getAttribute('data-contact-id'));
+                        const defaultEmail = checkbox.getAttribute('data-default-email') || '';
+                        checkbox.addEventListener('change', () => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            if (checkbox.checked) {
+                                selectedEmails.set(contactId, emailInput ? emailInput.value.trim() : defaultEmail);
+                            } else {
+                                selectedEmails.delete(contactId);
+                            }
+                            updateModal();
+                        });
+                    });
+                    
+                    dialog.querySelectorAll('button[id^="editEmail_"]').forEach(btn => {
+                        const contactId = parseInt(btn.getAttribute('data-contact-id'));
+                        btn.addEventListener('click', () => {
+                            editingEmails.add(contactId);
+                            updateModal();
+                        });
+                    });
+                    
+                    dialog.querySelectorAll('button[id^="saveEmail_"]').forEach(btn => {
+                        const contactId = parseInt(btn.getAttribute('data-contact-id'));
+                        btn.addEventListener('click', () => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            const newEmail = emailInput ? emailInput.value.trim() : '';
+                            if (newEmail) {
+                                selectedEmails.set(contactId, newEmail);
+                            }
+                            editingEmails.delete(contactId);
+                            updateModal();
+                        });
+                    });
+                    
+                    const showNewContactBtn = dialog.querySelector('#showNewContactBtn');
+                    if (showNewContactBtn) {
+                        showNewContactBtn.addEventListener('click', () => {
+                            showNewContactForm = true;
+                            updateModal();
+                        });
+                    }
+                    
+                    const hideNewContactBtn = dialog.querySelector('#hideNewContactBtn');
+                    if (hideNewContactBtn) {
+                        hideNewContactBtn.addEventListener('click', () => {
+                            showNewContactForm = false;
+                            updateModal();
+                        });
+                    }
+                    
+                    const cancelBtn = dialog.querySelector('#cancelBtn');
+                    const sendBtn = dialog.querySelector('#sendBtn');
+                    
+                    if (cancelBtn) {
+                        cancelBtn.onclick = () => {
+                            close();
+                            resolve(null);
+                        };
+                    }
+                    
+                    if (sendBtn) {
+                        sendBtn.onclick = () => {
+                            const emails = [];
+                            const contactsToAdd = [];
+                            selectedEmails.forEach((email, contactId) => {
+                                const emailInput = document.getElementById(`email_${contactId}`);
+                                const finalEmail = (emailInput ? emailInput.value.trim() : email.trim()) || email.trim();
+                                if (finalEmail) emails.push(finalEmail);
+                            });
+                            
+                            const newEmailCheck = document.getElementById('newEmailCheck');
+                            const newEmail = document.getElementById('newEmail');
+                            if (newEmailCheck && newEmailCheck.checked && newEmail && newEmail.value.trim()) {
+                                emails.push(newEmail.value.trim());
+                                contactsToAdd.push({
+                                    email: newEmail.value.trim(),
+                                    first_name: (document.getElementById('newFirstName')?.value || '').trim(),
+                                    last_name: (document.getElementById('newLastName')?.value || '').trim()
+                                });
+                            }
+                            
+                            if (emails.length === 0) {
+                                showToast('Pasirinkite bent vieną el. pašto adresą', 'error');
+                                return;
+                            }
+                            
+                            close();
+                            resolve({ emails, contactsToAdd, partnerId });
+                        };
+                    }
+                };
+                
+                updateModal();
+                modal.appendChild(dialog);
+                document.body.appendChild(modal);
+            });
+        }
+        
+        async function sendEmail() {
+            {% if carrier.id %}
+                const carrierId = {{ carrier.id }};
+                const lang = '{{ lang }}';
+                const partnerId = {% if carrier.partner %}{{ carrier.partner.id }}{% else %}null{% endif %};
+                const result = await showEmailPrompt(partnerId);
+                
+                if (!result || !result.emails || result.emails.length === 0) return;
+                
+                const loadingToast = showToast('Siunčiama...', 'info');
+                
+                try {
+                    let baseUrl = window.location.origin;
+                    if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                        baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                    }
+                    const response = await fetch(`${baseUrl}/api/orders/carriers/${carrierId}/send_email/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            emails: result.emails,
+                            contacts_to_add: result.contactsToAdd || [],
+                            lang: lang
+                        })
+                    });
+                    
+                    if (loadingToast) loadingToast.remove();
+                    
+                    const data = await response.json();
+                    if (data.success && data.sent) {
+                        showToast(data.message || 'El. laiškas sėkmingai išsiųstas!', 'success');
+                    } else {
+                        showToast(data.error || data.message || 'Klaida siunčiant el. laišką', 'error');
+                    }
+                } catch (error) {
+                    if (loadingToast) loadingToast.remove();
+                    showToast('Klaida siunčiant el. laišką: ' + error.message, 'error');
+                }
+            {% endif %}
+        }
+    </script>
+</body>
+</html>

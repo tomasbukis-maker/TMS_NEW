@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <title>{{ labels.invoice_title }} {{ invoice.received_invoice_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        
+        html, body {
+            background-color: #FAFAFA;
+            margin: 0;
+            padding: 0;
+            font-family: verdana, arial, helvetica, sans-serif;
+        }
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            background: #fff;
+            position: relative;
+            padding: 10mm;
+            margin: 0 auto;
+        }
+        
+        .subpage {
+            padding-left: 10mm;
+            padding-right: 5mm;
+            padding-top: 10mm;
+            padding-bottom: 3mm;
+            background-color: #FFF;
+            width: 100%;
+            min-height: 277mm;
+        }
+    
+        * {
+            box-sizing: border-box;
+        }
+        
+        @media print {
+            @page {
+                size: A4;
+                margin: 0;
+            }
+            html, body {
+                background-color: #FFFFFF;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            .page {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 0;
+                padding: 10mm;
+                border: none;
+                box-shadow: none;
+            }
+            .subpage {
+                padding-left: 10mm;
+                padding-right: 5mm;
+                padding-top: 10mm;
+                padding-bottom: 3mm;
+                margin: 0;
+                border: 0;
+                width: 100%;
+                min-height: auto;
+            }
+        }
+        
+        .tmp_body {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 12px;
+            color: #000000;
+        }
+
+        .forma {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+
+        .tmp_table_head {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="subpage">
+            <div id="saskaita">
+                {% if logo_url %}
+                <div style="text-align: center; padding-bottom: 10px;">
+                    <img src="{{ logo_url }}" alt="{{ company.name }}" style="max-height: 50px; max-width: 200px;">
+                </div>
+                {% endif %}
+                
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="tmp_body" style="vertical-align: top; width:50%">
+                                <b>{{ labels.supplier }}</b><br>
+                                <b>{{ invoice.partner.name }}</b><br>
+                                {% if invoice.partner.code %}{{ labels.code }} <b>{{ invoice.partner.code }}</b><br>{% endif %}
+                                {% if invoice.partner.vat_code %}{{ labels.vat_code }} <b>{{ invoice.partner.vat_code }}</b><br>{% endif %}
+                                {% if invoice.partner.address %}{{ labels.address }} <br>
+                                <b>{{ invoice.partner.address }}</b><br>{% endif %}
+                                {% if invoice.partner.city %}<b>{{ invoice.partner.city }}</b>{% if invoice.partner.country %}, {{ invoice.partner.country }}{% endif %}<br>{% endif %}
+                                {% if invoice.partner.phone %}{{ labels.phone }} <b>{{ invoice.partner.phone }}</b><br>{% endif %}
+                                {% if invoice.partner.email %}{{ labels.email }} <b>{{ invoice.partner.email }}</b><br>{% endif %}
+                            </td>
+                            <td class="tmp_body" style="vertical-align: top; width:50%">
+                                <b>{{ company.name }}</b><br>
+                                {% if company.code %}{{ labels.code }} <b>{{ company.code }}</b><br>{% endif %}
+                                {% if company.vat_code %}{{ labels.vat_code }} <b>{{ company.vat_code }}</b><br>{% endif %}
+                                {{ labels.address }} <br>
+                                <b>{{ company.address }}, {{ company.city }}</b><br>
+                                {% if company.phone %}{{ labels.phone }} <b>{{ company.phone }}</b><br>{% endif %}
+                                {% if company.email %}{{ labels.email }} <b>{{ company.email }}</b><br>{% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                
+                <hr>
+                <div style="text-align: center; font-weight: bold; font-size: 14px;">
+                    {{ labels.invoice_title }}
+                </div>
+                <div style="text-align: center; font-size: 12px;">
+                    {{ labels.invoice_number }}: <b>{{ invoice.received_invoice_number }}</b>
+                </div>
+                <hr>
+                
+                <table border="0" cellspacing="0" cellpadding="5" width="100%" style="margin-top: 10px;">
+                    <tr>
+                        <td class="tmp_body" style="width: 30%;"><b>{{ labels.issue_date }}:</b></td>
+                        <td class="tmp_body">{{ invoice.issue_date|date:"Y.m.d" }}</td>
+                    </tr>
+                    {% if invoice.received_date %}
+                    <tr>
+                        <td class="tmp_body"><b>{{ labels.received_date }}:</b></td>
+                        <td class="tmp_body">{{ invoice.received_date|date:"Y.m.d" }}</td>
+                    </tr>
+                    {% endif %}
+                    <tr>
+                        <td class="tmp_body"><b>{{ labels.due_date }}:</b></td>
+                        <td class="tmp_body">{{ invoice.due_date|date:"Y.m.d" }}</td>
+                    </tr>
+                    {% if invoice.payment_date %}
+                    <tr>
+                        <td class="tmp_body"><b>{{ labels.payment_date }}:</b></td>
+                        <td class="tmp_body">{{ invoice.payment_date|date:"Y.m.d" }}</td>
+                    </tr>
+                    {% endif %}
+                    <tr>
+                        <td class="tmp_body"><b>{{ labels.payment_status }}:</b></td>
+                        <td class="tmp_body">{{ payment_status_display }}</td>
+                    </tr>
+                    {% if invoice.expense_category %}
+                    <tr>
+                        <td class="tmp_body"><b>{{ labels.expense_category }}:</b></td>
+                        <td class="tmp_body">{{ invoice.expense_category.name }}</td>
+                    </tr>
+                    {% endif %}
+                </table>
+                
+                {% if related_orders %}
+                <div style="margin-top: 15px;">
+                    <div class="tmp_table_head">{{ labels.related_orders }}:</div>
+                    <ul style="margin-top: 5px;">
+                        {% for order in related_orders %}
+                        <li class="tmp_body">{{ order.order_number }} ({{ order.order_date|date:"Y.m.d" }})</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+                
+                <hr style="margin-top: 20px;">
+                
+                <table border="1" cellspacing="0" cellpadding="5" width="100%" style="border-collapse: collapse; margin-top: 10px;">
+                    <tr style="background: #f0f0f0;">
+                        <td class="tmp_table_head" style="text-align: center; width: 5%;">Nr.</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 45%;">{{ labels.description }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 15%;">{{ labels.amount_net }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 10%;">{{ labels.vat_rate }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 12%;">{{ labels.vat_amount }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 13%;">{{ labels.amount_total }}</td>
+                    </tr>
+                    <tr>
+                        <td class="forma" style="text-align: center;">1</td>
+                        <td class="forma">
+                            {% if invoice.expense_category %}{{ invoice.expense_category.name }}{% else %}Paslaugos{% endif %}
+                            {% if related_orders %}
+                            <br><small>
+                                {% for order in related_orders %}
+                                    {{ order.order_number }}{% if not forloop.last %}, {% endif %}
+                                {% endfor %}
+                            </small>
+                            {% endif %}
+                        </td>
+                        <td class="forma" style="text-align: right;">{{ invoice.amount_net|floatformat:2 }} €</td>
+                        <td class="forma" style="text-align: center;">{{ invoice.vat_rate|floatformat:0 }}%</td>
+                        <td class="forma" style="text-align: right;">{{ vat_amount|floatformat:2 }} €</td>
+                        <td class="forma" style="text-align: right; font-weight: bold;">{{ invoice.amount_total|floatformat:2 }} €</td>
+                    </tr>
+                </table>
+                
+                <div style="margin-top: 20px; text-align: right;">
+                    <div class="tmp_body">
+                        <b>{{ labels.amount_total }}: {{ invoice.amount_total|floatformat:2 }} €</b>
+                    </div>
+                    <div class="forma" style="margin-top: 5px;">
+                        {{ labels.amount_in_words }}: <b>{{ amount_in_words }}</b>
+                    </div>
+                </div>
+                
+                {% if invoice.notes %}
+                <div style="margin-top: 30px;">
+                    <div class="tmp_table_head">{{ labels.notes }}:</div>
+                    <div class="tmp_body" style="margin-top: 5px;">{{ invoice.notes|linebreaks }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

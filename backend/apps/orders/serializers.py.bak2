@@ -1,0 +1,849 @@
+from rest_framework import serializers
+import logging
+from typing import Optional
+from .models import Order, OrderCarrier, City, VehicleType, OtherCostType, CargoItem, AutocompleteSuggestion, RouteContact
+from apps.partners.serializers import PartnerSerializer
+from .models import OrderCarrierDocument
+from apps.auth.serializers import UserSerializer
+from apps.invoices.models import SalesInvoice
+from apps.settings.models import ExpeditionSettings
+
+logger = logging.getLogger(__name__)
+
+
+class AutocompleteSuggestionSerializer(serializers.ModelSerializer):
+    """Autocomplete pasiūlymų serializer"""
+    field_type_display = serializers.CharField(source='get_field_type_display', read_only=True)
+    
+    class Meta:
+        model = AutocompleteSuggestion
+        fields = ['id', 'field_type', 'field_type_display', 'value', 'usage_count', 'last_used_at', 'created_at']
+        read_only_fields = ['id', 'usage_count', 'last_used_at', 'created_at']
+
+
+class RouteContactSerializer(serializers.ModelSerializer):
+    """Maršruto kontaktų (siuntėjų/gavėjų) serializer"""
+    contact_type_display = serializers.CharField(source='get_contact_type_display', read_only=True)
+    
+    class Meta:
+        model = RouteContact
+        fields = [
+            'id', 'contact_type', 'contact_type_display', 'name', 
+            'country', 'postal_code', 'city', 'address',
+            'usage_count', 'last_used_at', 'created_at'
+        ]
+        read_only_fields = ['id', 'usage_count', 'last_used_at', 'created_at']
+
+
+class CitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = City
+        fields = ['id', 'name', 'created_at']
+
+
+class VehicleTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = VehicleType
+        fields = ['id', 'name', 'created_at']
+
+
+class OtherCostTypeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OtherCostType
+        fields = ['id', 'description', 'created_at']
+
+
+class CargoItemSerializer(serializers.ModelSerializer):
+    """Krovinių aprašymų serializer"""
+    
+    class Meta:
+        model = CargoItem
+        fields = [
+            'id', 'order', 'sequence_order', 'reference_number', 'description',
+            'units', 'weight_kg', 'ldm', 'pallet_count', 'package_count',
+            'length_m', 'width_m', 'height_m',
+            'is_palletized', 'is_stackable', 'vehicle_type',
+            'requires_forklift', 'requires_crane', 'requires_special_equipment',
+            'fragile', 'hazardous', 'temperature_controlled', 'requires_permit',
+            'notes', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
+    
+    def create(self, validated_data):
+        """Išsaugoti autocomplete pasiūlymą krovinių aprašymui"""
+        instance = super().create(validated_data)
+        
+        # Išsaugoti krovinių aprašymą į autocomplete pasiūlymus
+        if instance.description and instance.description.strip():
+            try:
+                suggestion, created = AutocompleteSuggestion.objects.get_or_create(
+                    field_type=AutocompleteSuggestion.FieldType.CARGO_DESCRIPTION,
+                    value=instance.description.strip(),
+                    defaults={'usage_count': 1}
+                )
+                if not created:
+                    suggestion.usage_count += 1
+                    suggestion.save()
+            except Exception as e:
+                logger.error(f"Error saving cargo description autocomplete suggestion: {e}")
+        
+        return instance
+    
+    def update(self, instance, validated_data):
+        """Išsaugoti autocomplete pasiūlymą krovinių aprašymui"""
+        instance = super().update(instance, validated_data)
+        
+        # Išsaugoti krovinių aprašymą į autocomplete pasiūlymus
+        if instance.description and instance.description.strip():
+            try:
+                suggestion, created = AutocompleteSuggestion.objects.get_or_create(
+                    field_type=AutocompleteSuggestion.FieldType.CARGO_DESCRIPTION,
+                    value=instance.description.strip(),
+                    defaults={'usage_count': 1}
+                )
+                if not created:
+                    suggestion.usage_count += 1
+                    suggestion.save()
+            except Exception as e:
+                logger.error(f"Error saving cargo description autocomplete suggestion: {e}")
+        
+        return instance
+
+
+class OrderCarrierDocumentSerializer(serializers.ModelSerializer):
+    document_type_display = serializers.CharField(source='get_document_type_display', read_only=True)
+
+    class Meta:
+        model = OrderCarrierDocument
+        fields = [
+            'id',
+            'order_carrier',
+            'document_type',
+            'document_type_display',
+            'amount',
+            'invoice_number',
+            'cmr_number',
+            'issue_date',
+            'received_date',
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = ['id', 'document_type_display', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        document_type = attrs.get('document_type') or getattr(self.instance, 'document_type', None)
+        amount = attrs.get('amount') if 'amount' in attrs else getattr(self.instance, 'amount', None)
+        invoice_number = attrs.get('invoice_number') if 'invoice_number' in attrs else getattr(self.instance, 'invoice_number', None)
+        cmr_number = attrs.get('cmr_number') if 'cmr_number' in attrs else getattr(self.instance, 'cmr_number', None)
+
+        if document_type == OrderCarrierDocument.DocumentType.INVOICE and (amount is None or amount == ''):
+            raise serializers.ValidationError({'amount': 'Sąskaitai būtina nurodyti sumą.'})
+
+        if document_type == OrderCarrierDocument.DocumentType.INVOICE:
+            if not invoice_number:
+                raise serializers.ValidationError({'invoice_number': 'Sąskaitai būtina nurodyti numerį.'})
+            # CMR numeris netaikomas sąskaitoms
+            attrs['cmr_number'] = None
+        elif document_type == OrderCarrierDocument.DocumentType.CMR:
+            if not cmr_number:
+                raise serializers.ValidationError({'cmr_number': 'CMR dokumentui būtina nurodyti numerį.'})
+            # Sąskaitos numeris netaikomas CMR
+            attrs['invoice_number'] = None
+        else:
+            attrs['invoice_number'] = None
+            attrs['cmr_number'] = None
+
+        return attrs
+
+
+class OrderCarrierSerializer(serializers.ModelSerializer):
+    """Užsakymo vežėjų/sandėlių serializer"""
+    partner = PartnerSerializer(read_only=True)
+    partner_id = serializers.IntegerField(write_only=True)
+    order_id = serializers.IntegerField(write_only=True, required=False)
+    order = serializers.SerializerMethodField()
+    expedition_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    carrier_type_display = serializers.CharField(source='get_carrier_type_display', read_only=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    calculated_status = serializers.SerializerMethodField()
+    calculated_status_display = serializers.SerializerMethodField()
+    
+    def get_order(self, obj):
+        """Grąžina užsakymo ID ir numerį"""
+        try:
+            if obj.order:
+                return {
+                    'id': obj.order.id,
+                    'order_number': obj.order.order_number
+                }
+        except (AttributeError, Exception):
+            pass
+        return None
+    
+    def get_calculated_status(self, obj):
+        """Saugus būdas gauti calculated_status"""
+        try:
+            return obj.calculated_status
+        except (AttributeError, Exception):
+            # Jei klaida, grąžinti esamą statusą
+            return getattr(obj, 'status', 'new')
+    payment_status_display = serializers.CharField(source='get_payment_status_display', read_only=True)
+    payment_status_info = serializers.SerializerMethodField()
+    price_with_vat = serializers.SerializerMethodField()
+    vat_amount = serializers.SerializerMethodField()
+    documents = OrderCarrierDocumentSerializer(many=True, read_only=True)
+    
+    def get_calculated_status_display(self, obj):
+        """Grąžina automatiškai apskaičiuoto statuso tekstinį atvaizdavimą"""
+        try:
+            calculated = obj.calculated_status
+            if not calculated:
+                return obj.status_display  # Fallback į esamą status_display
+            status_map = {
+                'new': 'Naujas',
+                'in_progress': 'Vykdomas',
+                'completed': 'Baigtas',
+                'cancelled': 'Atšauktas',
+            }
+            return status_map.get(calculated, calculated)
+        except (AttributeError, Exception):
+            # Jei klaida, grąžinti esamą status_display
+            return getattr(obj, 'status_display', 'Naujas')
+    
+    def get_payment_status_info(self, obj):
+        """Safer way to get payment status info"""
+        try:
+            return obj.payment_status_info
+        except (AttributeError, Exception):
+            return {
+                'status': 'not_paid',
+                'message': 'Neapmokėtas'
+            }
+    
+    def get_price_with_vat(self, obj):
+        """Safer way to get price with VAT"""
+        try:
+            if hasattr(obj, 'price_net') and obj.price_net:
+                from decimal import Decimal
+                # Naudoti vežėjo PVM tarifą, jei jis yra, kitaip užsakymo PVM tarifą
+                vat_rate = getattr(obj, 'vat_rate', None)
+                if vat_rate is None and hasattr(obj, 'order') and obj.order:
+                    vat_rate = getattr(obj.order, 'vat_rate', None)
+                # Jei vat_rate yra 0, grąžinti price_net (be PVM)
+                if vat_rate is not None:
+                    if Decimal(str(vat_rate)) == 0:
+                        return float(obj.price_net)
+                    return float(obj.price_net * (1 + Decimal(str(vat_rate)) / 100))
+            return None
+        except (AttributeError, TypeError, Exception) as e:
+            print(f"Error getting price_with_vat: {e}")
+            return None
+    
+    def get_vat_amount(self, obj):
+        """Safer way to get VAT amount"""
+        try:
+            if hasattr(obj, 'price_net') and obj.price_net:
+                from decimal import Decimal
+                # Naudoti vežėjo PVM tarifą, jei jis yra, kitaip užsakymo PVM tarifą
+                vat_rate = getattr(obj, 'vat_rate', None)
+                if vat_rate is None and hasattr(obj, 'order') and obj.order:
+                    vat_rate = getattr(obj.order, 'vat_rate', None)
+                # Jei vat_rate yra 0, grąžinti 0
+                if vat_rate is not None:
+                    if Decimal(str(vat_rate)) == 0:
+                        return 0.0
+                    return float(obj.price_net * (Decimal(str(vat_rate)) / 100))
+            return None
+        except (AttributeError, TypeError, Exception) as e:
+            print(f"Error getting vat_amount: {e}")
+            return None
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        carrier_type = attrs.get('carrier_type') or getattr(self.instance, 'carrier_type', OrderCarrier.CarrierType.CARRIER)
+        expedition_number = attrs.get('expedition_number')
+        
+        # Debug: log vat_rate value
+        vat_rate = attrs.get('vat_rate')
+        if vat_rate is not None:
+            logger.info(f"OrderCarrierSerializer.validate: vat_rate={vat_rate}, type={type(vat_rate)}")
+            # Ensure vat_rate is properly converted to Decimal if it's a string
+            if isinstance(vat_rate, str):
+                try:
+                    from decimal import Decimal
+                    attrs['vat_rate'] = Decimal(vat_rate)
+                except (ValueError, Exception) as e:
+                    logger.error(f"Error converting vat_rate '{vat_rate}' to Decimal: {e}")
+                    raise serializers.ValidationError({'vat_rate': f'Neteisingas PVM tarifo formatas: {vat_rate}'})
+
+        if expedition_number:
+            expedition_number = expedition_number.strip().upper()
+            attrs['expedition_number'] = expedition_number
+            qs = OrderCarrier.objects.filter(expedition_number=expedition_number)
+            if self.instance:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError({'expedition_number': 'Ekspedicijos numeris jau naudojamas.'})
+
+        if carrier_type == OrderCarrier.CarrierType.WAREHOUSE:
+            attrs['expedition_number'] = None
+
+        return attrs
+
+    def _maybe_generate_expedition_number(self, carrier_type: str, current_value: Optional[str]) -> Optional[str]:
+        if carrier_type != OrderCarrier.CarrierType.CARRIER:
+            return None
+        if current_value:
+            return current_value
+        try:
+            settings = ExpeditionSettings.load()
+            if settings.auto_numbering:
+                return ExpeditionSettings.generate_next_number()
+        except Exception as exc:
+            logger.error('Nepavyko sugeneruoti ekspedicijos numerio: %s', exc)
+        return current_value
+
+    def create(self, validated_data):
+        # Ištraukti order_id arba order (priimame abu variantus dėl atgalinio suderinamumo)
+        order_id = validated_data.pop('order_id', None)
+        order_value = validated_data.pop('order', None)
+        
+        # Jei nurodytas order_id, naudoti jį
+        if order_id:
+            try:
+                validated_data['order'] = Order.objects.get(id=order_id)
+            except Order.DoesNotExist:
+                raise serializers.ValidationError({'order_id': 'Užsakymas nerastas.'})
+        # Jei nurodytas order (kaip ID), naudoti jį
+        elif order_value:
+            try:
+                # Jei order_value yra integer (ID), konvertuoti į Order instance
+                if isinstance(order_value, int):
+                    validated_data['order'] = Order.objects.get(id=order_value)
+                # Jei order_value jau yra Order instance, naudoti tiesiogiai
+                elif isinstance(order_value, Order):
+                    validated_data['order'] = order_value
+                else:
+                    raise serializers.ValidationError({'order': 'Neteisingas užsakymo formatas.'})
+            except Order.DoesNotExist:
+                raise serializers.ValidationError({'order': 'Užsakymas nerastas.'})
+        else:
+            raise serializers.ValidationError({'order_id': 'Užsakymas (order_id arba order) yra privalomas.'})
+        
+        carrier_type = validated_data.get('carrier_type', OrderCarrier.CarrierType.CARRIER)
+        expedition_number = validated_data.get('expedition_number')
+        generated = self._maybe_generate_expedition_number(carrier_type, expedition_number)
+        validated_data['expedition_number'] = generated
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        carrier_type = validated_data.get('carrier_type', instance.carrier_type)
+        # Jei expedition_number yra validated_data, naudoti jį (net jei None arba tuščias)
+        # Jei nėra validated_data, naudoti esamą instance.expedition_number
+        expedition_number = validated_data.get('expedition_number') if 'expedition_number' in validated_data else instance.expedition_number
+
+        if carrier_type != OrderCarrier.CarrierType.CARRIER:
+            validated_data['expedition_number'] = None
+        else:
+            # Jei expedition_number yra None arba tuščias string, generuoti naują tik jei nėra esamo
+            if expedition_number is None or (isinstance(expedition_number, str) and expedition_number.strip() == ''):
+                # Jei jau yra esamas numeris, palikti jį
+                if instance.expedition_number:
+                    validated_data['expedition_number'] = instance.expedition_number
+                else:
+                    # Jei nėra esamo, generuoti naują
+                    validated_data['expedition_number'] = self._maybe_generate_expedition_number(
+                        carrier_type,
+                        None
+                    )
+            else:
+                # Jei expedition_number yra pateiktas, naudoti jį
+                validated_data['expedition_number'] = expedition_number.strip().upper()
+
+        return super().update(instance, validated_data)
+    
+    class Meta:
+        model = OrderCarrier
+        fields = [
+            'id', 'order', 'order_id', 'partner', 'partner_id', 'carrier_type', 'carrier_type_display',
+            'expedition_number', 'sequence_order', 'price_net', 'vat_rate', 'vat_rate_article',
+            'price_with_vat', 'vat_amount',
+            'route_from', 'route_to', 'route_from_country', 'route_from_postal_code', 'route_from_city', 'route_from_address', 'route_to_country', 'route_to_postal_code', 'route_to_city', 'route_to_address', 'loading_date', 'unloading_date',
+            'status', 'status_display', 'calculated_status', 'calculated_status_display',
+            'invoice_issued', 'invoice_received',
+            'invoice_received_date', 'payment_days', 'due_date',
+            'payment_status', 'payment_status_display', 'payment_date',
+            'payment_status_info', 'payment_terms',
+            'notes', 'created_at', 'updated_at', 'documents'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'calculated_status', 'calculated_status_display']  # order gali būti nustatytas per order_id arba order (write_only)
+        extra_kwargs = {
+            'order': {'write_only': True, 'required': False}  # order gali būti nustatytas per order_id arba order
+        }
+    
+    def validate_partner_id(self, value):
+        """Tikrina ar partneris egzistuoja"""
+        from apps.partners.models import Partner
+        try:
+            partner = Partner.objects.get(id=value)
+        except Partner.DoesNotExist:
+            raise serializers.ValidationError("Pasirinktas partneris nerastas.")
+        return value
+    
+    def validate_order_id(self, value):
+        """Tikrina ar užsakymas egzistuoja"""
+        try:
+            order = Order.objects.get(id=value)
+        except Order.DoesNotExist:
+            raise serializers.ValidationError("Pasirinktas užsakymas nerastas.")
+        return value
+
+    def validate_expedition_number(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = value.strip()
+        if not value:
+            return None
+        return value.upper()
+
+
+class OrderSerializer(serializers.ModelSerializer):
+    """Užsakymo serializer"""
+    client = PartnerSerializer(read_only=True)
+    client_id = serializers.IntegerField(write_only=True)
+    manager = UserSerializer(read_only=True)
+    manager_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+    order_type_display = serializers.SerializerMethodField()
+    price_with_vat = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    vat_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    client_price_with_vat = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, allow_null=True)
+    client_vat_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True, allow_null=True)
+    client_payment_status_display = serializers.CharField(source='get_client_payment_status_display', read_only=True)
+    has_overdue_invoices = serializers.BooleanField(read_only=True)
+    payment_status_info = serializers.SerializerMethodField()
+    
+    def get_order_type_display(self, obj):
+        try:
+            return obj.order_type_display
+        except AttributeError:
+            return getattr(obj, 'order_type', '') or ''
+
+    def get_payment_status_info(self, obj):
+        """Safer way to get payment status info"""
+        try:
+            return obj.payment_status_info
+        except (AttributeError, Exception):
+            return {
+                'status': 'not_paid',
+                'message': 'Neapmokėta',
+                'has_invoices': False,
+                'invoice_issued': getattr(obj, 'client_invoice_issued', False)
+            }
+    transport_warehouse_cost = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    other_costs = serializers.JSONField(required=False, allow_null=True)
+    other_costs_total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    calculated_client_price_net = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    # carriers = OrderCarrierSerializer(many=True, read_only=True)  # Laikinai išjungta
+    carriers = serializers.SerializerMethodField()
+    cargo_items = serializers.SerializerMethodField()
+    
+    def get_cargo_items(self, obj):
+        """Serializuoja cargo_items, bet tik jei instance turi PK"""
+        if obj.pk is None:
+            return []
+        return CargoItemSerializer(obj.cargo_items.all(), many=True).data
+    
+    def get_carriers(self, obj):
+        """Optimizuotas: serializuoja visus carriers vienu kartu naudojant many=True"""
+        try:
+            # Jei instance dar neturi PK, negalime pasiekti related objects
+            if obj.pk is None:
+                return []
+            if not hasattr(obj, 'carriers'):
+                return []
+            carriers = obj.carriers.all()
+            if not carriers:
+                return []
+            # Optimizacija: serializuoti visus carriers vienu kartu (many=True)
+            # Tai greičiau nei loop'as su kiekvienu serializer'iu
+            serializer = OrderCarrierSerializer(carriers, many=True, context=self.context)
+            return serializer.data
+        except (AttributeError, Exception) as e:
+            print(f"Error serializing carriers: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
+    
+    # Sąskaitų informacija
+    first_sales_invoice = serializers.SerializerMethodField()
+    sales_invoices_count = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = Order
+        fields = [
+            'id', 'order_number', 'client', 'client_id', 'order_type', 'order_type_display',
+            'manager', 'manager_id', 'status', 'status_display',
+            'price_net', 'client_price_net', 'my_price_net', 'other_costs', 'vat_rate', 'vat_rate_article',
+            'price_with_vat', 'vat_amount',
+            'client_price_with_vat', 'client_vat_amount',
+            'transport_warehouse_cost', 'other_costs_total', 'calculated_client_price_net',
+            'client_invoice_issued', 'client_invoice_received', 'client_payment_status', 'client_payment_status_display',
+            'has_overdue_invoices', 'payment_status_info',
+            'route_from', 'route_to', 'route_from_country', 'route_from_postal_code', 'route_from_city', 'route_from_address',
+            'route_to_country', 'route_to_postal_code', 'route_to_city', 'route_to_address',
+            'sender_route_from', 'receiver_route_to',
+            'order_date', 'loading_date', 'unloading_date',
+            'is_partial', 'weight_kg', 'ldm', 'length_m', 'width_m', 'height_m',
+            'is_palletized', 'is_stackable', 'vehicle_type',
+            'requires_forklift', 'requires_crane', 'requires_special_equipment',
+            'fragile', 'hazardous', 'temperature_controlled', 'requires_permit',
+            'notes', 'created_at', 'updated_at', 'created_by', 'carriers', 'cargo_items',
+            'first_sales_invoice', 'sales_invoices_count'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at', 'created_by']
+    
+    def validate_client_id(self, value):
+        """Tikrina ar partneris yra klientas"""
+        from apps.partners.models import Partner
+        try:
+            client = Partner.objects.get(id=value, is_client=True)
+        except Partner.DoesNotExist:
+            raise serializers.ValidationError("Pasirinktas partneris turi būti klientas.")
+        return value
+    
+    def validate_manager_id(self, value):
+        """Tikrina ar vadybininkas egzistuoja"""
+        if value is None:
+            return None
+        from apps.auth.models import User
+        try:
+            manager = User.objects.get(id=value)
+        except User.DoesNotExist:
+            raise serializers.ValidationError("Pasirinktas vadybininkas nerastas.")
+        return value
+    
+    def validate_other_costs(self, value):
+        """Tikrina ar other_costs yra teisingas formatas"""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError("other_costs turi būti masyvas (list).")
+        # Patikrinti ar kiekvienas elementas yra dict su description ir amount
+        for cost in value:
+            if not isinstance(cost, dict):
+                raise serializers.ValidationError("Kiekvienas other_costs elementas turi būti objektas (dict).")
+            if 'description' not in cost or 'amount' not in cost:
+                raise serializers.ValidationError("Kiekvienas other_costs elementas turi turėti 'description' ir 'amount' laukus.")
+        return value
+    
+    def create(self, validated_data):
+        """
+        Sukuria Order instance.
+        Apdoroja manager_id, order_date, order_number.
+        Išsaugo route contacts ir autocomplete suggestions.
+        
+        Note: order_number turi būti nustatytas perform_create() prieš kviečiant create().
+        Instance išsaugomas per DRF's save() mechanizmą (ne čia), kad created_by būtų teisingai nustatytas.
+        """
+        from django.utils import timezone
+        from apps.auth.models import User
+        
+        # Ištraukti specialius laukus
+        manager_id = validated_data.pop('manager_id', None)
+        order_number = validated_data.pop('order_number', None)
+        
+        # Nustatyti order_date, jei nėra
+        if not validated_data.get('order_date'):
+            today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            validated_data['order_date'] = today
+        
+        # Nustatyti manager, jei nurodytas (prieš sukūrimą)
+        if manager_id is not None:
+            try:
+                validated_data['manager'] = User.objects.get(id=manager_id)
+            except User.DoesNotExist:
+                pass
+        
+        # Sukurti instance
+        # Jei order_number nustatytas, naudoti Model.objects.create() su order_number,
+        # kad būtų įtrauktas į INSERT (ne UPDATE), taip išvengiant race conditions
+        # created_by bus nustatytas per DRF's save() metodą po create()
+        if order_number:
+            # Sukurti instance su order_number jau nustatytu per Model.objects.create()
+            # Tai užtikrina, kad order_number bus įtrauktas į INSERT užklausą, ne UPDATE
+            # created_by bus nustatytas per DRF's save() metodą, kuris atnaujins instance
+            validated_data['order_number'] = order_number
+            instance = self.Meta.model.objects.create(**validated_data)
+            # created_by bus nustatytas per DRF's save(created_by=...) po create()
+        else:
+            instance = super().create(validated_data)
+        
+        # Išsaugoti route contacts (po to, kai instance bus išsaugotas per DRF)
+        # Šie metodai turi būti kviečiami po instance.save(), bet kadangi DRF
+        # kviečia save() po create(), mes kviečiame juos čia, ir jie patys patikrins
+        # ar instance turi PK (t.y. ar jau išsaugotas)
+        self._save_route_contacts(instance, validated_data)
+        self._save_autocomplete_suggestions(instance, validated_data)
+        
+        return instance
+    
+    def _save_route_contacts(self, instance, validated_data):
+        """Išsaugoti siuntėjų/gavėjų kontaktus"""
+        # Išsaugoti siuntėją - naudoti instance duomenis
+        sender_name = getattr(instance, 'sender_route_from', '').strip() if hasattr(instance, 'sender_route_from') else validated_data.get('sender_route_from', '').strip()
+        if sender_name:
+            sender_contact, created = RouteContact.objects.get_or_create(
+                contact_type='sender',
+                name=sender_name,
+                country=getattr(instance, 'route_from_country', '') if hasattr(instance, 'route_from_country') else validated_data.get('route_from_country', ''),
+                postal_code=getattr(instance, 'route_from_postal_code', '') if hasattr(instance, 'route_from_postal_code') else validated_data.get('route_from_postal_code', ''),
+                city=getattr(instance, 'route_from_city', '') if hasattr(instance, 'route_from_city') else validated_data.get('route_from_city', ''),
+                address=getattr(instance, 'route_from_address', '') if hasattr(instance, 'route_from_address') else validated_data.get('route_from_address', ''),
+                defaults={'usage_count': 1}
+            )
+            if not created:
+                sender_contact.usage_count += 1
+                sender_contact.save()
+        
+        # Išsaugoti gavėją - naudoti instance duomenis
+        receiver_name = getattr(instance, 'receiver_route_to', '').strip() if hasattr(instance, 'receiver_route_to') else validated_data.get('receiver_route_to', '').strip()
+        if receiver_name:
+            receiver_contact, created = RouteContact.objects.get_or_create(
+                contact_type='receiver',
+                name=receiver_name,
+                country=getattr(instance, 'route_to_country', '') if hasattr(instance, 'route_to_country') else validated_data.get('route_to_country', ''),
+                postal_code=getattr(instance, 'route_to_postal_code', '') if hasattr(instance, 'route_to_postal_code') else validated_data.get('route_to_postal_code', ''),
+                city=getattr(instance, 'route_to_city', '') if hasattr(instance, 'route_to_city') else validated_data.get('route_to_city', ''),
+                address=getattr(instance, 'route_to_address', '') if hasattr(instance, 'route_to_address') else validated_data.get('route_to_address', ''),
+                defaults={'usage_count': 1}
+            )
+            if not created:
+                receiver_contact.usage_count += 1
+                receiver_contact.save()
+    
+    def _save_autocomplete_suggestions(self, instance, validated_data):
+        """Išsaugoti autocomplete pasiūlymus iš užsakymo laukų"""
+        try:
+            # Funkcija, kuri išsaugo autocomplete pasiūlymą
+            def save_suggestion(field_type, value):
+                if value and value.strip():
+                    try:
+                        suggestion, created = AutocompleteSuggestion.objects.get_or_create(
+                            field_type=field_type,
+                            value=value.strip(),
+                            defaults={'usage_count': 1}
+                        )
+                        if not created:
+                            suggestion.usage_count += 1
+                            suggestion.save()
+                        logger.debug(f"Saved autocomplete suggestion: {field_type} = {value.strip()}")
+                    except Exception as e:
+                        logger.error(f"Error saving autocomplete suggestion {field_type}: {e}", exc_info=True)
+            
+            # Funkcija, kuri gauna reikšmę iš instance arba validated_data
+            def get_field_value(field_name):
+                # Pirmiausia bandyti gauti iš instance
+                value = getattr(instance, field_name, None)
+                # Jei None arba tuščias, bandyti validated_data
+                if not value:
+                    value = validated_data.get(field_name, None) or ''
+                return value or ''
+            
+            # Išsaugoti užsakymo tipą
+            order_type_value = get_field_value('order_type')
+            if order_type_value and order_type_value.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ORDER_TYPE, order_type_value)
+
+            # Išsaugoti maršruto laukus
+            route_from_country = get_field_value('route_from_country')
+            if route_from_country and route_from_country.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_FROM_COUNTRY, route_from_country)
+            
+            route_from_postal_code = get_field_value('route_from_postal_code')
+            if route_from_postal_code and route_from_postal_code.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_FROM_POSTAL_CODE, route_from_postal_code)
+            
+            route_from_city = get_field_value('route_from_city')
+            if route_from_city and route_from_city.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_FROM_CITY, route_from_city)
+            
+            route_from_address = get_field_value('route_from_address')
+            if route_from_address and route_from_address.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_FROM_ADDRESS, route_from_address)
+            
+            route_to_country = get_field_value('route_to_country')
+            if route_to_country and route_to_country.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_TO_COUNTRY, route_to_country)
+            
+            route_to_postal_code = get_field_value('route_to_postal_code')
+            if route_to_postal_code and route_to_postal_code.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_TO_POSTAL_CODE, route_to_postal_code)
+            
+            route_to_city = get_field_value('route_to_city')
+            if route_to_city and route_to_city.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_TO_CITY, route_to_city)
+            
+            route_to_address = get_field_value('route_to_address')
+            if route_to_address and route_to_address.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ROUTE_TO_ADDRESS, route_to_address)
+            
+            # Išsaugoti krovinių aprašymus (cargo items)
+            # Cargo items gali būti kuriami po Order sukūrimo, todėl naudojame try/except
+            try:
+                if hasattr(instance, 'cargo_items'):
+                    for cargo_item in instance.cargo_items.all():
+                        if cargo_item.description and cargo_item.description.strip():
+                            save_suggestion(AutocompleteSuggestion.FieldType.CARGO_DESCRIPTION, cargo_item.description)
+            except Exception as e:
+                logger.debug(f"Cargo items not yet available or error: {e}")
+                # Ignoruoti, jei cargo_items dar neegzistuoja
+            
+            # Išsaugoti mašinos tipą
+            vehicle_type = get_field_value('vehicle_type')
+            if vehicle_type and vehicle_type.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.VEHICLE_TYPE, vehicle_type)
+            
+            # Išsaugoti užsakymo pastabas
+            notes = get_field_value('notes')
+            if notes and notes.strip():
+                save_suggestion(AutocompleteSuggestion.FieldType.ORDER_NOTES, notes)
+                
+        except Exception as e:
+            logger.error(f"Error saving autocomplete suggestions: {e}", exc_info=True)
+            # Nekelti klaidos, jei autocomplete pasiūlymų išsaugojimas nepavyksta
+    
+    def update(self, instance, validated_data):
+        """Perrašytas update metodas, kad teisingai apdorotų manager_id"""
+        # Ištraukiame manager_id iš validated_data
+        manager_id = validated_data.pop('manager_id', None)
+        
+        # Atnaujiname kitus laukus
+        instance = super().update(instance, validated_data)
+        
+        # Nustatome manager lauką pagal manager_id
+        if manager_id is not None:
+            from apps.auth.models import User
+            try:
+                instance.manager = User.objects.get(id=manager_id)
+            except User.DoesNotExist:
+                instance.manager = None
+        else:
+            instance.manager = None
+        
+        instance.save()
+        
+        # Refresh instance iš DB, kad gautume visus laukus
+        try:
+            instance.refresh_from_db()
+        except Exception as e:
+            logger.warning(f"Could not refresh instance from DB: {e}")
+        
+        # Išsaugoti siuntėją/gavėją RouteContact lentelėje
+        self._save_route_contacts(instance, validated_data)
+        
+        # Išsaugoti autocomplete pasiūlymus
+        self._save_autocomplete_suggestions(instance, validated_data)
+        
+        return instance
+    
+    def get_first_sales_invoice(self, obj):
+        """Optimizuotas: naudoja prefetched sales_invoices, kad išvengtų N+1 query"""
+        try:
+            from apps.invoices.models import SalesInvoice, SalesInvoiceOrder
+            invoice_ids = set()
+            if hasattr(obj, 'sales_invoices'):
+                invoice_ids.update(inv.id for inv in obj.sales_invoices.all())
+            if hasattr(obj, 'sales_invoice_links'):
+                invoice_ids.update(link.invoice_id for link in obj.sales_invoice_links.all() if link.invoice_id)
+            if not invoice_ids:
+                invoice_ids.update(SalesInvoice.objects.filter(related_order=obj).values_list('id', flat=True))
+                invoice_ids.update(SalesInvoiceOrder.objects.filter(order=obj).values_list('invoice_id', flat=True))
+            if not invoice_ids:
+                return None
+            sales_invoice = SalesInvoice.objects.filter(id__in=invoice_ids).order_by('created_at').first()
+            if sales_invoice:
+                return {
+                    'id': sales_invoice.id,
+                    'invoice_number': sales_invoice.invoice_number,
+                    'invoice_type': sales_invoice.invoice_type,
+                    'amount_total': str(sales_invoice.amount_total),
+                    'issue_date': sales_invoice.issue_date.strftime('%Y-%m-%d') if sales_invoice.issue_date else None,
+                    'due_date': sales_invoice.due_date.strftime('%Y-%m-%d') if sales_invoice.due_date else None,
+                }
+        except (AttributeError, Exception):
+            pass
+        return None
+    
+    def get_sales_invoices_count(self, obj):
+        """Optimizuotas: naudoja prefetched sales_invoices, kad išvengtų N+1 query"""
+        try:
+            from apps.invoices.models import SalesInvoice, SalesInvoiceOrder
+            invoice_ids = set()
+            if hasattr(obj, 'sales_invoices'):
+                invoice_ids.update(inv.id for inv in obj.sales_invoices.all())
+            if hasattr(obj, 'sales_invoice_links'):
+                invoice_ids.update(link.invoice_id for link in obj.sales_invoice_links.all() if link.invoice_id)
+            if not invoice_ids:
+                invoice_ids.update(SalesInvoice.objects.filter(related_order=obj).values_list('id', flat=True))
+                invoice_ids.update(SalesInvoiceOrder.objects.filter(order=obj).values_list('invoice_id', flat=True))
+            return len(invoice_ids)
+        except (AttributeError, Exception):
+            return 0
+
+
+class OrderStatusChangeSerializer(serializers.Serializer):
+    """Užsakymo statuso keitimo serializer"""
+    new_status = serializers.ChoiceField(choices=Order.OrderStatus.choices)
+    
+    def validate_new_status(self, value):
+        """Validacija: naujas statusas negali būti toks pat kaip dabartinis"""
+        # Ši validacija bus atlikta view lygmenyje
+        return value
+    
+    def get_first_sales_invoice(self, obj):
+        """Optimizuotas: naudoja prefetched sales_invoices, kad išvengtų N+1 query"""
+        try:
+            from apps.invoices.models import SalesInvoice, SalesInvoiceOrder
+            invoice_ids = set()
+            if hasattr(obj, 'sales_invoices'):
+                invoice_ids.update(inv.id for inv in obj.sales_invoices.all())
+            if hasattr(obj, 'sales_invoice_links'):
+                invoice_ids.update(link.invoice_id for link in obj.sales_invoice_links.all() if link.invoice_id)
+            if not invoice_ids:
+                invoice_ids.update(SalesInvoice.objects.filter(related_order=obj).values_list('id', flat=True))
+                invoice_ids.update(SalesInvoiceOrder.objects.filter(order=obj).values_list('invoice_id', flat=True))
+            if not invoice_ids:
+                return None
+            sales_invoice = SalesInvoice.objects.filter(id__in=invoice_ids).order_by('created_at').first()
+            if sales_invoice:
+                return {
+                    'id': sales_invoice.id,
+                    'invoice_number': sales_invoice.invoice_number,
+                    'invoice_type': sales_invoice.invoice_type,
+                    'amount_total': str(sales_invoice.amount_total),
+                    'issue_date': sales_invoice.issue_date.strftime('%Y-%m-%d') if sales_invoice.issue_date else None,
+                    'due_date': sales_invoice.due_date.strftime('%Y-%m-%d') if sales_invoice.due_date else None,
+                }
+        except (AttributeError, Exception):
+            pass
+        return None
+    
+    def get_sales_invoices_count(self, obj):
+        """Optimizuotas: naudoja prefetched sales_invoices, kad išvengtų N+1 query"""
+        try:
+            from apps.invoices.models import SalesInvoice, SalesInvoiceOrder
+            invoice_ids = set()
+            if hasattr(obj, 'sales_invoices'):
+                invoice_ids.update(inv.id for inv in obj.sales_invoices.all())
+            if hasattr(obj, 'sales_invoice_links'):
+                invoice_ids.update(link.invoice_id for link in obj.sales_invoice_links.all() if link.invoice_id)
+            if not invoice_ids:
+                invoice_ids.update(SalesInvoice.objects.filter(related_order=obj).values_list('id', flat=True))
+                invoice_ids.update(SalesInvoiceOrder.objects.filter(order=obj).values_list('invoice_id', flat=True))
+            return len(invoice_ids)
+        except (AttributeError, Exception):
+            return 0
+
+

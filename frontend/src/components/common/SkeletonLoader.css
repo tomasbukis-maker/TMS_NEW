@@ -1,0 +1,138 @@
+/* Skeleton Loader Animations */
+@keyframes skeleton-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.skeleton-line,
+.skeleton-cell {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 1000px 100%;
+  animation: skeleton-shimmer 2s infinite;
+  border-radius: 4px;
+  height: 16px;
+  margin-bottom: 8px;
+}
+
+.skeleton-line:last-child,
+.skeleton-cell:last-child {
+  margin-bottom: 0;
+}
+
+/* Table Skeleton */
+.skeleton-table {
+  width: 100%;
+}
+
+.skeleton-table-header {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-bottom: 2px solid #dee2e6;
+  margin-bottom: 8px;
+}
+
+.skeleton-table-row {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+/* Dynamic columns using inline style */
+.skeleton-table[style*="grid-template-columns"] .skeleton-table-header,
+.skeleton-table[style*="grid-template-columns"] .skeleton-table-row {
+  grid-template-columns: inherit;
+}
+
+.skeleton-table-row:last-child {
+  border-bottom: none;
+}
+
+.skeleton-header-cell {
+  height: 20px;
+  background: linear-gradient(90deg, #e0e0e0 25%, #d0d0d0 50%, #e0e0e0 75%);
+  background-size: 1000px 100%;
+  animation: skeleton-shimmer 2s infinite;
+}
+
+.skeleton-cell {
+  height: 18px;
+}
+
+/* Card Skeleton */
+.skeleton-card {
+  padding: 16px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.skeleton-card .skeleton-line {
+  margin-bottom: 12px;
+}
+
+.skeleton-card .skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+/* List Skeleton */
+.skeleton-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skeleton-list-item {
+  padding: 12px;
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e9ecef;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-list-item .skeleton-line {
+  margin-bottom: 0;
+}
+
+/* Text Skeleton */
+.skeleton-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-text .skeleton-line {
+  margin-bottom: 0;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .skeleton-table-header,
+  .skeleton-table-row {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    padding: 8px;
+  }
+}
+
+
+
+
+

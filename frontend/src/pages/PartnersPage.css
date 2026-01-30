@@ -1,0 +1,626 @@
+/* Modern Partners Page Styles */
+.partners-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  padding: 24px;
+}
+
+.partners-container {
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+/* Statistikos blokai */
+.partners-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
+.stat-card {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  border-left: 4px solid;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.stat-card-primary {
+  border-left-color: #3498db;
+}
+
+.stat-card-success {
+  border-left-color: #2ecc71;
+}
+
+.stat-card-info {
+  border-left-color: #3498db;
+}
+
+.stat-card-warning {
+  border-left-color: #f39c12;
+}
+
+.stat-card-icon {
+  font-size: 32px;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(52, 152, 219, 0.1) 0%, rgba(52, 152, 219, 0.05) 100%);
+  border-radius: 12px;
+}
+
+.stat-card-content {
+  flex: 1;
+}
+
+.stat-card-label {
+  font-size: 13px;
+  color: #7f8c8d;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.stat-card-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+/* Veiksmų juosta */
+.partners-actions-bar {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.partners-actions-left {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-modern {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.btn-modern:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.btn-modern:active {
+  transform: translateY(0);
+}
+
+.btn-modern:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+}
+
+.btn-secondary {
+  background: white;
+  color: #2c3e50;
+  border: 2px solid #e0e0e0;
+}
+
+.btn-secondary:hover {
+  border-color: #3498db;
+  color: #3498db;
+}
+
+.btn-icon {
+  font-size: 16px;
+}
+
+/* Filtravimo sekcija */
+.partners-filters-section {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.search-box {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.search-icon {
+  position: absolute;
+  left: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  color: #95a5a6;
+}
+
+.search-input {
+  width: 100%;
+  padding: 12px 16px 12px 48px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: #3498db;
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+}
+
+.search-clear {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #95a5a6;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.search-clear:hover {
+  background: #f0f0f0;
+  color: #e74c3c;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-tab {
+  padding: 10px 20px;
+  border: 2px solid #e0e0e0;
+  background: white;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #2c3e50;
+}
+
+.filter-tab:hover {
+  border-color: #3498db;
+  color: #3498db;
+}
+
+.filter-tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+}
+
+/* Partnerių tinklelis */
+.partners-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.partner-card {
+  background: white;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: 2px solid transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.partner-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-color: #3498db;
+}
+
+.partner-card-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding-bottom: 10px;
+}
+
+.partner-card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.partner-card-title h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #2c3e50;
+  flex: 1;
+  line-height: 1.3;
+}
+
+.partner-badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.badge {
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.badge-client {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.badge-supplier {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+}
+
+.badge-status {
+  background: #ecf0f1;
+  color: #2c3e50;
+}
+
+.badge-status.active {
+  background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+  color: white;
+}
+
+.badge-status.inactive {
+  background: #e74c3c;
+  color: white;
+}
+
+.partner-card-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.partner-info-row {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.info-label {
+  font-weight: 600;
+  color: #7f8c8d;
+  min-width: 65px;
+  flex-shrink: 0;
+}
+
+.info-value {
+  color: #2c3e50;
+  flex: 1;
+  word-break: break-word;
+}
+
+.info-value.email {
+  word-break: break-all;
+  color: #3498db;
+}
+
+.partner-card-footer {
+  display: flex;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid #f0f0f0;
+  flex-wrap: wrap;
+}
+
+.btn-card-action {
+  flex: 1;
+  min-width: 70px;
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
+  background: white;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #2c3e50;
+}
+
+.btn-card-action:hover {
+  background: #f8f9fa;
+  border-color: #3498db;
+  color: #3498db;
+}
+
+.btn-card-action.btn-danger:hover {
+  background: #fff5f5;
+  border-color: #e74c3c;
+  color: #e74c3c;
+}
+
+/* Tuščias būsenos dizainas */
+.partners-empty-state {
+  background: white;
+  border-radius: 12px;
+  padding: 60px 20px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.empty-state-icon {
+  font-size: 64px;
+  margin-bottom: 16px;
+}
+
+.partners-empty-state h3 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  color: #2c3e50;
+}
+
+.partners-empty-state p {
+  margin: 0 0 24px 0;
+  color: #7f8c8d;
+  font-size: 14px;
+}
+
+/* Kraunama būsena */
+.partners-loading {
+  background: white;
+  border-radius: 12px;
+  padding: 60px 20px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.loading-spinner {
+  width: 48px;
+  height: 48px;
+  border: 4px solid #f0f0f0;
+  border-top-color: #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto 16px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.partners-loading p {
+  color: #7f8c8d;
+  font-size: 14px;
+}
+
+/* Puslapiavimas */
+.partners-pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.pagination-btn {
+  padding: 10px 20px;
+  border: 2px solid #e0e0e0;
+  background: white;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #2c3e50;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  border-color: #3498db;
+  color: #3498db;
+}
+
+.pagination-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  font-size: 14px;
+  font-weight: 600;
+  color: #7f8c8d;
+}
+
+/* Responsive dizainas */
+@media (max-width: 768px) {
+  .partners-page {
+    padding: 16px;
+  }
+
+  .partners-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .partners-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .partners-actions-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .partners-actions-left {
+    flex-direction: column;
+  }
+
+  .btn-modern {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .filter-tabs {
+    flex-direction: column;
+  }
+
+  .filter-tab {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+/* Seni stiliai (paliekami dėl suderinamumo) */
+.page {
+  min-height: 100vh;
+  background-color: #f5f5f5;
+  padding: 20px 0;
+}
+
+.filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.filter-btn {
+  padding: 8px 16px;
+  border: 1px solid #ddd;
+  background: white;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-btn:hover {
+  background-color: #f8f9fa;
+}
+
+.filter-btn.active {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.table {
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  padding: 8px;
+  font-size: 13px;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  background-color: #f8f9fa;
+  z-index: 10;
+}
+
+.cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.card {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  padding: 16px;
+  transition: box-shadow 0.2s;
+}
+
+.card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.card-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #2c3e50;
+}
+
+.card-body {
+  margin-bottom: 12px;
+}
+
+.card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.card-footer small {
+  font-size: 12px;
+}
+
+.card-footer button {
+  margin-left: 8px;
+}

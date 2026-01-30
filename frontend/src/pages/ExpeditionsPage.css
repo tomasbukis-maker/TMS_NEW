@@ -1,0 +1,539 @@
+.expeditions-page {
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  background-color: #f8fafc;
+  min-height: calc(100vh - 80px);
+}
+
+.expeditions-header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.expeditions-header h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.expeditions-header p {
+  margin: 4px 0 0;
+  font-size: 14px;
+  color: #475569;
+}
+
+.expeditions-meta {
+  font-size: 13px;
+  color: #475569;
+  background: #e2e8f0;
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.expeditions-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 8px 16px -12px rgba(15, 23, 42, 0.4);
+}
+
+.expeditions-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.expeditions-filter label {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+.expeditions-filter select {
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5f5;
+  background: #f8fafc;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.expeditions-table-wrapper {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 0;
+  overflow: hidden;
+  box-shadow: 0 20px 45px -20px rgba(15, 23, 42, 0.35);
+}
+
+.expeditions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.expeditions-table thead {
+  background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+}
+
+.expeditions-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #475569;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.expeditions-table td {
+  padding: 14px 16px;
+  border-bottom: 1px solid #f1f5f9;
+  color: #0f172a;
+  vertical-align: top;
+}
+
+.expeditions-table tbody tr:hover {
+  background: #f8fafc;
+}
+
+.expeditions-empty {
+  text-align: center;
+  padding: 24px;
+  color: #94a3b8;
+}
+
+.expedition-number {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.expedition-number .muted {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.expedition-type {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #0369a1;
+  font-size: 11px;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.expedition-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.order-id {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.order-created {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.expedition-partner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.partner-name {
+  font-weight: 600;
+}
+
+.partner-code {
+  font-size: 12px;
+  color: #64748b;
+  letter-spacing: 0.04em;
+}
+
+.expedition-route {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.route-arrow {
+  color: #94a3b8;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-badge.badge-info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status-badge.badge-primary {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.status-badge.badge-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-badge.badge-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.badge-secondary {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.payment-badge {
+  display: inline-flex;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.payment-badge-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.payment-badge-warning {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.payment-badge-info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.payment-badge-danger {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.expedition-payment {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.payment-amount {
+  font-size: 12px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.expeditions-table tr.mail-match {
+  background: linear-gradient(90deg, rgba(250, 204, 21, 0.15) 0%, rgba(255, 255, 255, 0) 100%);
+}
+
+.expedition-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.doc-badge {
+  display: inline-flex;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  width: fit-content;
+}
+
+.doc-badge-success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.doc-badge-warning {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.doc-badge-muted {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.expedition-mail-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+  font-size: 20px;
+  line-height: 1;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s ease;
+}
+
+.expedition-mail-indicator:hover {
+  transform: scale(1.15);
+}
+
+.invoice-indicator {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.invoice-indicator-success {
+  color: #166534;
+}
+
+.invoice-indicator-muted {
+  color: #94a3b8;
+}
+
+.expeditions-error {
+  padding: 12px 16px;
+  background: #fee2e2;
+  color: #991b1b;
+  border-bottom: 1px solid #fecaca;
+}
+
+.expeditions-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: #475569;
+}
+
+.pagination-buttons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.pagination-buttons button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #0ea5e9;
+  border: none;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.pagination-buttons button:disabled {
+  background: #cbd5f5;
+  cursor: not-allowed;
+}
+
+.pagination-buttons button:not(:disabled):hover {
+  background: #0284c7;
+}
+
+.pagination-page {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mail-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  padding: 24px;
+}
+
+.mail-modal {
+  background: #ffffff;
+  width: min(720px, 100%);
+  max-height: 90vh;
+  border-radius: 12px;
+  box-shadow: 0 30px 60px -25px rgba(15, 23, 42, 0.5);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.mail-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.mail-modal-header h2 {
+  margin: 0;
+  font-size: 20px;
+  color: #0f172a;
+}
+
+.mail-modal-close {
+  background: none;
+  border: none;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  color: #475569;
+}
+
+.mail-modal-body {
+  padding: 16px 20px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mail-modal-loading,
+.mail-modal-error,
+.mail-modal-empty {
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+}
+
+.mail-modal-loading {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.mail-modal-error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.mail-modal-empty {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.mail-modal-message-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mail-modal-message {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(241, 245, 249, 0.8) 0%, #ffffff 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mail-modal-message-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mail-modal-subject {
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.mail-modal-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.mail-modal-snippet {
+  font-size: 13px;
+  color: #334155;
+  line-height: 1.5;
+}
+
+.mail-modal-attachments {
+  font-size: 13px;
+  color: #475569;
+}
+
+.mail-modal-attachments ul {
+  padding-left: 18px;
+  margin: 6px 0 0;
+}
+
+.mail-attachment-button {
+  color: #0ea5e9;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.mail-attachment-button:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 1024px) {
+  .expeditions-table th,
+  .expeditions-table td {
+    font-size: 13px;
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .expeditions-page {
+    padding: 16px;
+  }
+
+  .expeditions-filters {
+    flex-direction: column;
+  }
+
+  .expeditions-filter {
+    width: 100%;
+  }
+
+  .expeditions-table-wrapper {
+    overflow-x: auto;
+  }
+}

@@ -1,0 +1,3976 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { api } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import AutocompleteInput from '../components/AutocompleteInput';
+// import OrderDetailsModal from '../components/orders/OrderDetailsModal'; // Naikinimui
+// import OrderEditModal from '../components/orders/OrderEditModal'; // Naikinimui
+import OrderEditModal_NEW from '../components/orders/OrderEditModal_NEW';
+import { SkeletonTable } from '../components/common/SkeletonLoader';
+import AttachmentPreviewModal from '../components/common/AttachmentPreviewModal';
+import HTMLPreviewModal, { HTMLPreview } from '../components/common/HTMLPreviewModal';
+import { ExpeditionDocument } from '../types/expedition';
+import { useUISettings } from '../hooks/useUISettings';
+import './OrdersPage.css';
+
+const ORDER_STATUSES = [
+  { value: 'new', label: 'Naujas' },
+  { value: 'assigned', label: 'Priskirtas' },
+  { value: 'executing', label: 'Vykdomas' },
+  { value: 'waiting_for_docs', label: 'Laukiama Dokumentų' },
+  { value: 'waiting_for_payment', label: 'Laukiama Apmokėjimo' },
+  { value: 'finished', label: 'Baigtas' },
+  { value: 'canceled', label: 'Atšauktas' },
+  { value: 'closed', label: 'Uždarytas' },
+];
+
+// Komponentas tooltip'ui su vežėjų pavadinimais
+const CarrierTooltip: React.FC<{ carriers: any[] }> = ({ carriers }) => {
+  const { t } = useTranslation();
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  return (
+    <div 
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <span
+        style={{
+          cursor: 'help',
+          textDecoration: 'underline',
+          textDecorationStyle: 'dotted',
+          textUnderlineOffset: '2px'
+        }}
+      >
+        {t('orders.table.multiple_carriers')} ({carriers.length})
+      </span>
+      {showTooltip && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: '0',
+            marginBottom: '5px',
+            padding: '8px 12px',
+            backgroundColor: '#333',
+            color: '#fff',
+            borderRadius: '4px',
+            fontSize: '12px',
+            zIndex: 1000,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            pointerEvents: 'none',
+            maxWidth: '300px',
+            whiteSpace: 'normal',
+            minWidth: '200px'
+          }}
+        >
+          {carriers.map((c: any, idx: number) => (
+            <div key={idx} style={{ marginBottom: idx < carriers.length - 1 ? '4px' : '0' }}>
+              {c.partner?.name || 'Nežinomas'}
+              {c.expedition_number && (
+                <span style={{ marginLeft: '6px', fontSize: '11px', opacity: 0.8 }}>
+                  (Eksp.: {c.expedition_number})
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Komponentas tooltip'ui su vežėjų sąskaitų statusu
+const CarrierInvoiceStatusTooltip: React.FC<{ 
+  carriers: any[];
+  children: React.ReactNode;
+}> = ({ carriers, children }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Helper funkcija, kuri patikrina ar vežėjas turi sąskaitą
+  const getInvoiceDocs = (carrier: any): ExpeditionDocument[] => {
+    const documents = (carrier.documents || []) as ExpeditionDocument[];
+    return documents.filter((doc) => doc.document_type === 'invoice');
+  };
+
+  const hasInvoice = (carrier: any): boolean => {
+    const hasDocs = getInvoiceDocs(carrier).length > 0;
+    const hasInvoiceReceived = carrier.invoice_received === true;
+    return hasDocs || hasInvoiceReceived;
+  };
+
+  useEffect(() => {
+    if (showTooltip && containerRef.current) {
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const initialTop = containerRect.top - 10;
+      const initialLeft = containerRect.left + (containerRect.width / 2);
+      setTooltipPosition({ top: initialTop, left: initialLeft });
+      
+      const updatePosition = () => {
+        if (containerRef.current && tooltipRef.current) {
+          const containerRect = containerRef.current.getBoundingClientRect();
+          const tooltipRect = tooltipRef.current.getBoundingClientRect();
+          const viewportHeight = window.innerHeight;
+          const viewportWidth = window.innerWidth;
+          
+          let top = containerRect.top - tooltipRect.height - 10;
+          let left = containerRect.left + (containerRect.width / 2);
+          
+          // Patikrinti, ar telpa viršuje
+          if (top < 10) {
+            top = containerRect.bottom + 10;
+          }
+          
+          // Patikrinti horizontalų pozicionavimą
+          if (left + tooltipRect.width / 2 > viewportWidth - 10) {
+            left = viewportWidth - tooltipRect.width / 2 - 10;
+          }
+          if (left - tooltipRect.width / 2 < 10) {
+            left = tooltipRect.width / 2 + 10;
+          }
+          
+          setTooltipPosition({ top, left });
+        }
+      };
+      
+      setTimeout(updatePosition, 10);
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+      
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+      };
+    } else {
+      setTooltipPosition(null);
+    }
+  }, [showTooltip]);
+
+  return (
+    <div 
+      ref={containerRef}
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <div style={{ cursor: 'help' }}>
+        {children}
+      </div>
+      {showTooltip && tooltipPosition && (
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'fixed',
+            top: `${tooltipPosition.top}px`,
+            left: `${tooltipPosition.left}px`,
+            transform: 'translateX(-50%)',
+            padding: '10px 12px',
+            backgroundColor: '#333',
+            color: '#fff',
+            borderRadius: '4px',
+            fontSize: '12px',
+            zIndex: 10000,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            pointerEvents: 'none',
+            maxWidth: '350px',
+            whiteSpace: 'normal',
+            minWidth: '250px'
+          }}
+        >
+          <div style={{ marginBottom: '8px', fontWeight: 'bold', borderBottom: '1px solid #555', paddingBottom: '4px' }}>
+            Vežėjų sąskaitų statusas:
+          </div>
+          {carriers.map((carrier: any, idx: number) => {
+            const hasInv = hasInvoice(carrier);
+            return (
+              <div 
+                key={idx} 
+                style={{ 
+                  marginBottom: idx < carriers.length - 1 ? '6px' : '0',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                <span style={{ fontSize: '14px', color: hasInv ? '#28a745' : '#dc3545' }}>
+                  {hasInv ? '✓' : '✗'}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: '500' }}>
+                    {carrier.partner?.name || 'Nežinomas'}
+                  </div>
+                  {carrier.expedition_number && (
+                    <div style={{ fontSize: '11px', opacity: 0.8, marginTop: '2px' }}>
+                      Eksp.: {carrier.expedition_number}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+// Tooltip komponentas užsakymo kliento kainai su sąskaitos informacija ir papildomomis išlaidomis
+const OrderClientPriceTooltip: React.FC<{ 
+  order: OrdersPageOrder;
+  children: React.ReactNode;
+}> = ({ order, children }) => {
+  const { t } = useTranslation();
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Sąskaitos informacija
+  const invoice = order.first_sales_invoice;
+  const otherCosts = order.other_costs || [];
+  const hasOtherCosts = otherCosts.length > 0;
+  const hasInvoice = !!invoice;
+
+  // Helper funkcija datos formatavimui
+  const formatDate = (dateString: string | null | undefined): string => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+      return date.toLocaleDateString('lt-LT');
+    } catch (e) {
+      return dateString;
+    }
+  };
+
+  // Skaičiuoti, kiek liko iki termino apmokėti
+  const getDaysUntilDue = (): string => {
+    // PIRMA patikrinti, ar sąskaita apmokėta
+    if (order.payment_status_info?.status === 'paid') {
+      return t('orders.tooltips.paid');
+    }
+    
+    // Jei yra sąskaita su due_date, skaičiuoti dienas pagal ją
+    if (invoice?.due_date) {
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const dueDate = new Date(invoice.due_date);
+        dueDate.setHours(0, 0, 0, 0);
+        
+        const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (daysDiff < 0) {
+          return t('orders.tooltips.overdue', { days: Math.abs(daysDiff) });
+        } else if (daysDiff === 0) {
+          return t('orders.tooltips.due_today');
+        } else {
+          return t('orders.tooltips.days_left', { days: daysDiff });
+        }
+      } catch (e) {
+        // Jei nepavyko skaičiuoti, tęsti su kitais patikrinimais
+      }
+    }
+    
+    // Tik tada patikrinti vėlavimą iš payment_status_info
+    if (order.payment_status_info?.overdue_days !== undefined) {
+      const overdueDays = order.payment_status_info.overdue_days;
+      if (overdueDays > 0) {
+        return t('orders.tooltips.overdue', { days: overdueDays });
+      }
+    }
+    
+    // Jei nėra informacijos apie terminas, grąžinti pagal statusą
+    if (order.payment_status_info?.status === 'overdue') {
+      return t('orders.status.overdue');
+    } else if (order.payment_status_info?.status === 'partially_paid') {
+      return t('invoices.partially_paid');
+    } else {
+      return t('orders.tooltips.no_invoice');
+    }
+  };
+
+  useEffect(() => {
+    if (showTooltip && containerRef.current) {
+      // Pirmiausia nustatyti pradinę poziciją
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const initialTop = containerRect.bottom + 5;
+      const initialLeft = containerRect.left + (containerRect.width / 2);
+      setTooltipPosition({ top: initialTop, left: initialLeft });
+      
+      // Tada atnaujinti poziciją, kai tooltip'as jau atvaizduotas
+      const updatePosition = () => {
+        if (containerRef.current && tooltipRef.current) {
+          const containerRect = containerRef.current.getBoundingClientRect();
+          const tooltipRect = tooltipRef.current.getBoundingClientRect();
+          const viewportHeight = window.innerHeight;
+          const viewportWidth = window.innerWidth;
+          
+          // Apskaičiuoti poziciją
+          let top = containerRect.bottom + 5;
+          let left = containerRect.left + (containerRect.width / 2);
+          
+          // Patikrinti, ar telpa žemiau
+          if (top + tooltipRect.height > viewportHeight - 10) {
+            // Jei netelpa žemiau, rodyti viršuje
+            top = containerRect.top - tooltipRect.height - 5;
+            if (top < 10) {
+              // Jei netelpa viršuje, rodyti viduryje ekrano
+              top = Math.max(10, (viewportHeight - tooltipRect.height) / 2);
+            }
+          }
+          
+          // Patikrinti horizontalų pozicionavimą
+          if (left + tooltipRect.width / 2 > viewportWidth - 10) {
+            left = viewportWidth - tooltipRect.width / 2 - 10;
+          }
+          if (left - tooltipRect.width / 2 < 10) {
+            left = tooltipRect.width / 2 + 10;
+          }
+          
+          setTooltipPosition({ top, left });
+        }
+      };
+      
+      // Palaukti, kol tooltip'as bus atvaizduotas
+      setTimeout(updatePosition, 10);
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+      
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+      };
+    } else {
+      setTooltipPosition(null);
+    }
+  }, [showTooltip]);
+
+  // Rodyti tooltip tik jei yra sąskaita arba papildomos išlaidos
+  if (!hasInvoice && !hasOtherCosts) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div 
+      ref={containerRef}
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <div style={{ cursor: 'help' }}>
+        {children}
+      </div>
+      {showTooltip && tooltipPosition && (
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'fixed',
+            top: `${tooltipPosition.top}px`,
+            left: `${tooltipPosition.left}px`,
+            transform: 'translateX(-50%)',
+            padding: '10px 12px',
+            backgroundColor: '#333',
+            color: '#fff',
+            borderRadius: '4px',
+            fontSize: '11px',
+            zIndex: 10000,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            pointerEvents: 'none',
+            maxWidth: '300px',
+            whiteSpace: 'normal',
+            minWidth: '200px',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }}
+        >
+          {hasInvoice && (
+            <>
+              <div style={{ marginBottom: '8px', fontWeight: 'bold', borderBottom: '1px solid #555', paddingBottom: '4px' }}>
+                Sąskaitos informacija:
+              </div>
+              <div style={{ marginBottom: '6px', lineHeight: '1.5' }}>
+                <div><strong>Sąskaitos numeris:</strong> {invoice.invoice_number}</div>
+                <div><strong>Išrašymo data:</strong> {formatDate(invoice.issue_date)}</div>
+                <div><strong>Terminas apmokėti:</strong> {getDaysUntilDue()}</div>
+              </div>
+            </>
+          )}
+          {hasOtherCosts && (
+            <>
+              {hasInvoice && <div style={{ marginTop: '8px', marginBottom: '6px', fontWeight: 'bold', borderTop: '1px solid #555', borderBottom: '1px solid #555', paddingTop: '4px', paddingBottom: '4px' }}>
+                Papildomos išlaidos:
+              </div>}
+              {!hasInvoice && <div style={{ marginBottom: '6px', fontWeight: 'bold', borderBottom: '1px solid #555', paddingBottom: '4px' }}>
+                Papildomos išlaidos:
+              </div>}
+              {otherCosts.map((cost, idx) => (
+                <div key={idx} style={{ marginBottom: idx < otherCosts.length - 1 ? '6px' : '0', lineHeight: '1.4' }}>
+                  <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>{cost.description || 'Nenurodyta'}</div>
+                  <div>{parseFloat(String(cost.amount || 0)).toFixed(2)} EUR</div>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Tooltip komponentas užsakymo vežėjo kainai su pirkimo sąskaitos informacija
+const CarrierPriceTooltip: React.FC<{ 
+  order: OrdersPageOrder;
+  children: React.ReactNode;
+}> = ({ order, children }) => {
+  const { t } = useTranslation();
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [tooltipPosition, setTooltipPosition] = useState<{ top: number; left: number } | null>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Rasti pirmą vežėją su gauta sąskaita
+  const carrierWithInvoice = order.carriers && Array.isArray(order.carriers)
+    ? order.carriers.find((c: any) => c.invoice_received && c.invoice_received_date)
+    : null;
+
+  // Helper funkcija datos formatavimui
+  const formatDate = (dateString: string | null | undefined): string => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return dateString;
+      return date.toLocaleDateString('lt-LT');
+    } catch (e) {
+      return dateString;
+    }
+  };
+
+  // Skaičiuoti, kiek liko iki termino apmokėti
+  const getDaysUntilDue = (): string => {
+    if (!carrierWithInvoice?.due_date) {
+      return t('orders.tooltips.no_invoice');
+    }
+    
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      const dueDate = new Date(carrierWithInvoice.due_date);
+      dueDate.setHours(0, 0, 0, 0);
+      
+      const daysDiff = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff < 0) {
+        return t('orders.tooltips.overdue', { days: Math.abs(daysDiff) });
+      } else if (daysDiff === 0) {
+        return t('orders.tooltips.due_today');
+      } else {
+        return t('orders.tooltips.days_left', { days: daysDiff });
+      }
+    } catch (e) {
+      return '-';
+    }
+  };
+
+  useEffect(() => {
+    if (showTooltip && containerRef.current) {
+      // Pirmiausia nustatyti pradinę poziciją
+      const containerRect = containerRef.current.getBoundingClientRect();
+      const initialTop = containerRect.bottom + 5;
+      const initialLeft = containerRect.left + (containerRect.width / 2);
+      setTooltipPosition({ top: initialTop, left: initialLeft });
+      
+      // Tada atnaujinti poziciją, kai tooltip'as jau atvaizduotas
+      const updatePosition = () => {
+        if (containerRef.current && tooltipRef.current) {
+          const containerRect = containerRef.current.getBoundingClientRect();
+          const tooltipRect = tooltipRef.current.getBoundingClientRect();
+          const viewportHeight = window.innerHeight;
+          const viewportWidth = window.innerWidth;
+          
+          // Apskaičiuoti poziciją
+          let top = containerRect.bottom + 5;
+          let left = containerRect.left + (containerRect.width / 2);
+          
+          // Patikrinti, ar telpa žemiau
+          if (top + tooltipRect.height > viewportHeight - 10) {
+            // Jei netelpa žemiau, rodyti viršuje
+            top = containerRect.top - tooltipRect.height - 5;
+            if (top < 10) {
+              // Jei netelpa viršuje, rodyti viduryje ekrano
+              top = Math.max(10, (viewportHeight - tooltipRect.height) / 2);
+            }
+          }
+          
+          // Patikrinti horizontalų pozicionavimą
+          if (left + tooltipRect.width / 2 > viewportWidth - 10) {
+            left = viewportWidth - tooltipRect.width / 2 - 10;
+          }
+          if (left - tooltipRect.width / 2 < 10) {
+            left = tooltipRect.width / 2 + 10;
+          }
+          
+          setTooltipPosition({ top, left });
+        }
+      };
+      
+      // Palaukti, kol tooltip'as bus atvaizduotas
+      setTimeout(updatePosition, 10);
+      window.addEventListener('scroll', updatePosition, true);
+      window.addEventListener('resize', updatePosition);
+      
+      return () => {
+        window.removeEventListener('scroll', updatePosition, true);
+        window.removeEventListener('resize', updatePosition);
+      };
+    } else {
+      setTooltipPosition(null);
+    }
+  }, [showTooltip]);
+
+  // Rodyti tooltip tik jei yra vežėjas su gauta sąskaita
+  if (!carrierWithInvoice) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div 
+      ref={containerRef}
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <div style={{ cursor: 'help' }}>
+        {children}
+      </div>
+      {showTooltip && tooltipPosition && (
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'fixed',
+            top: `${tooltipPosition.top}px`,
+            left: `${tooltipPosition.left}px`,
+            transform: 'translateX(-50%)',
+            padding: '10px 12px',
+            backgroundColor: '#333',
+            color: '#fff',
+            borderRadius: '4px',
+            fontSize: '11px',
+            zIndex: 10000,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            pointerEvents: 'none',
+            maxWidth: '300px',
+            whiteSpace: 'normal',
+            minWidth: '200px',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }}
+        >
+          <div style={{ marginBottom: '8px', fontWeight: 'bold', borderBottom: '1px solid #555', paddingBottom: '4px' }}>
+            Pirkimo sąskaitos informacija:
+          </div>
+          <div style={{ marginBottom: '6px', lineHeight: '1.5' }}>
+            <div><strong>Gavimo data:</strong> {formatDate(carrierWithInvoice.invoice_received_date)}</div>
+            <div><strong>Terminas apmokėti:</strong> {getDaysUntilDue()}</div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Komponentas tooltip'ui su pilnu maršruto adresu
+const RouteTooltip: React.FC<{ 
+  order: OrdersPageOrder;
+  children: React.ReactNode;
+}> = ({ order, children }) => {
+  const [showTooltip, setShowTooltip] = useState(false);
+  const [showAbove, setShowAbove] = useState(false);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Formuoti adresą iš (tik siuntėjas ir adresas)
+  const getFullRouteFrom = () => {
+    const parts: Array<{ label: string; value: string }> = [];
+    
+    // Siuntėjas
+    if (order.sender_route_from) {
+      parts.push({ label: 'Siuntėjas:', value: order.sender_route_from });
+    }
+    
+    // Adresas (sudaryti iš visų adreso dalių)
+    const addressParts = [
+      order.route_from_address,
+      order.route_from_postal_code,
+      order.route_from_city,
+      order.route_from_country
+    ].filter(Boolean);
+    
+    if (addressParts.length > 0) {
+      parts.push({ label: 'Adresas:', value: addressParts.join(', ') });
+    }
+    
+    return parts;
+  };
+
+  // Formuoti adresą į (tik gavėjas ir adresas)
+  const getFullRouteTo = () => {
+    const parts: Array<{ label: string; value: string }> = [];
+    
+    // Gavėjas
+    if (order.receiver_route_to) {
+      parts.push({ label: 'Gavėjas:', value: order.receiver_route_to });
+    }
+    
+    // Adresas (sudaryti iš visų adreso dalių)
+    const addressParts = [
+      order.route_to_address,
+      order.route_to_postal_code,
+      order.route_to_city,
+      order.route_to_country
+    ].filter(Boolean);
+    
+    if (addressParts.length > 0) {
+      parts.push({ label: 'Adresas:', value: addressParts.join(', ') });
+    }
+    
+    return parts;
+  };
+
+  const fullRouteFrom = getFullRouteFrom();
+  const fullRouteTo = getFullRouteTo();
+
+  // Patikrinti, ar tooltip'as telpa žemiau, jei ne - rodyti viršuje
+  useEffect(() => {
+    if (showTooltip && tooltipRef.current && containerRef.current) {
+      // Palaukti, kol tooltip'as bus atvaizduotas
+      setTimeout(() => {
+        if (tooltipRef.current && containerRef.current) {
+          const tooltipRect = tooltipRef.current.getBoundingClientRect();
+          const containerRect = containerRef.current.getBoundingClientRect();
+          const viewportHeight = window.innerHeight;
+          
+          // Jei tooltip'as išeina už ekrano apačios, rodyti viršuje
+          const spaceBelow = viewportHeight - containerRect.bottom;
+          const tooltipHeight = tooltipRect.height;
+          
+          if (spaceBelow < tooltipHeight + 20) {
+            setShowAbove(true);
+          } else {
+            setShowAbove(false);
+          }
+        }
+      }, 0);
+    }
+  }, [showTooltip]);
+
+  return (
+    <div 
+      ref={containerRef}
+      style={{ position: 'relative', display: 'inline-block', width: '100%' }}
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      <div style={{ cursor: 'help' }}>
+        {children}
+      </div>
+      {showTooltip && (
+        <div
+          ref={tooltipRef}
+          style={{
+            position: 'absolute',
+            ...(showAbove ? {
+              bottom: '100%',
+              marginBottom: '5px',
+            } : {
+              top: '100%',
+              marginTop: '5px',
+            }),
+            left: '50%',
+            transform: 'translateX(-50%)',
+            padding: '10px 12px',
+            backgroundColor: '#333',
+            color: '#fff',
+            borderRadius: '4px',
+            fontSize: '11px',
+            zIndex: 10000,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+            pointerEvents: 'none',
+            maxWidth: '350px',
+            whiteSpace: 'normal',
+            minWidth: '250px',
+            maxHeight: '80vh',
+            overflowY: 'auto'
+          }}
+        >
+          <div style={{ marginBottom: '8px' }}>
+            {fullRouteFrom.length > 0 ? (
+              fullRouteFrom.map((part, idx) => (
+                <div key={idx} style={{ marginBottom: idx < fullRouteFrom.length - 1 ? '6px' : '0', lineHeight: '1.4' }}>
+                  <span style={{ fontWeight: 'bold', marginRight: '6px' }}>{part.label}</span>
+                  <span>{part.value}</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ color: '#999', fontStyle: 'italic' }}>Nėra duomenų</div>
+            )}
+          </div>
+          <div style={{ marginBottom: '8px', marginTop: '8px', borderTop: '1px solid #555', paddingTop: '8px' }}>
+          </div>
+          <div>
+            {fullRouteTo.length > 0 ? (
+              fullRouteTo.map((part, idx) => (
+                <div key={idx} style={{ marginBottom: idx < fullRouteTo.length - 1 ? '6px' : '0', lineHeight: '1.4' }}>
+                  <span style={{ fontWeight: 'bold', marginRight: '6px' }}>{part.label}</span>
+                  <span>{part.value}</span>
+                </div>
+              ))
+            ) : (
+              <div style={{ color: '#999', fontStyle: 'italic' }}>Nėra duomenų</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const normalizeCarrier = (carrier: OrdersPageCarrier): OrdersPageCarrier => ({
+  ...carrier,
+  invoice_issued: carrier.invoice_issued ?? false,
+  payment_status: carrier.payment_status || 'not_paid',
+  payment_status_display: carrier.payment_status_display || 'Neapmokėta',
+  documents: carrier.documents as ExpeditionDocument[] | undefined,
+});
+
+const normalizeOrderData = (order: any): OrdersPageOrder => ({
+  ...order,
+  carriers: order.carriers?.map(normalizeCarrier),
+});
+
+interface Contact {
+  id: number;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  position?: string;
+  notes?: string;
+}
+
+interface Client {
+  id: number;
+  name: string;
+  code: string;
+  vat_code?: string;
+  address?: string;
+  is_client?: boolean;
+  is_supplier?: boolean;
+  status?: string;
+  status_display?: string;
+  contact_person?: Contact | null;
+  contacts?: Contact[];
+  payment_term_days?: number;
+  notes?: string;
+}
+
+interface User {
+  id: number;
+  username: string;
+}
+
+interface OtherCost {
+  description: string;
+  amount: number;
+}
+
+
+type OrdersPageOrder = {
+  id: number;
+  order_number?: string | null;
+  client: Client;
+  client_id: number;
+  carrier: Client | null;
+  carrier_id: number | null;
+  order_type: string;
+  order_type_display: string;
+  manager: User | null;
+  manager_id: number | null;
+  status: string;
+  status_display: string;
+  price_net: string;
+  client_price_net: string | null;
+  my_price_net?: string | number | null;
+  other_costs?: OtherCost[];
+  transport_warehouse_cost?: string | number;
+  other_costs_total?: string | number;
+  calculated_client_price_net?: string | number;
+  vat_rate: string;
+  vat_rate_article?: string;
+  price_with_vat: string;
+  vat_amount: string;
+  client_price_with_vat: string | null;
+  client_vat_amount: string | null;
+  carrier_price_with_vat: string | null;
+  carrier_vat_amount: string | null;
+  client_invoice_issued: boolean;
+  client_invoice_received: boolean;
+  route_from: string;
+  route_to: string;
+  route_from_country: string;
+  route_from_postal_code: string;
+  route_from_city: string;
+  route_from_address: string;
+  route_to_country: string;
+  route_to_postal_code: string;
+  route_to_city: string;
+  route_to_address: string;
+  sender_route_from?: string;
+  receiver_route_to?: string;
+  order_date: string | null;
+  loading_date: string | null;
+  unloading_date: string | null;
+  loading_date_from: string | null;
+  loading_date_to: string | null;
+  unloading_date_from: string | null;
+  unloading_date_to: string | null;
+  is_partial?: boolean;
+  weight_kg?: string | number | null;
+  ldm?: string | number | null;
+  length_m?: string | number | null;
+  width_m?: string | number | null;
+  height_m?: string | number | null;
+  is_palletized?: boolean;
+  is_stackable?: boolean;
+  vehicle_type?: string | null;
+  vehicle_type_display?: string | null;
+  requires_forklift?: boolean;
+  requires_crane?: boolean;
+  requires_special_equipment?: boolean;
+  fragile?: boolean;
+  hazardous?: boolean;
+  temperature_controlled?: boolean;
+  requires_permit?: boolean;
+  notes: string;
+  created_at: string;
+  client_payment_status: 'not_paid' | 'partially_paid' | 'paid';
+  client_payment_status_display: string;
+  carriers?: OrdersPageCarrier[];
+  cargo_items?: CargoItem[];
+  first_sales_invoice?: {
+    id: number;
+    invoice_number: string;
+    invoice_type: string;
+    amount_total: string;
+    issue_date: string | null;
+    due_date?: string | null;
+  } | null;
+  sales_invoices_count?: number;
+  has_overdue_invoices?: boolean;
+  payment_status_info?: {
+    status: 'not_paid' | 'partially_paid' | 'paid' | 'overdue';
+    message: string;
+    has_invoices: boolean;
+    invoice_issued?: boolean;
+    payment_date?: string;
+    overdue_days?: number;
+  };
+}
+
+interface CargoItem {
+  id?: number;
+  order?: number;
+  sequence_order: number;
+  description?: string;
+  weight_kg?: string | number | null;
+  ldm?: string | number | null;
+  length_m?: string | number | null;
+  width_m?: string | number | null;
+  height_m?: string | number | null;
+  is_palletized?: boolean;
+  is_stackable?: boolean;
+  vehicle_type?: string | null;
+  requires_forklift?: boolean;
+  requires_crane?: boolean;
+  requires_special_equipment?: boolean;
+  fragile?: boolean;
+  hazardous?: boolean;
+  temperature_controlled?: boolean;
+  requires_permit?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type OrdersPageCarrier = {
+  id?: number;
+  order?: number | null;
+  partner: Client;
+  partner_id: number;
+  carrier_type: 'carrier' | 'warehouse';
+  carrier_type_display: string;
+  expedition_number?: string | null;
+  sequence_order: number;
+  price_net: string | null;
+  price_with_vat: string | null;
+  vat_amount: string | null;
+  route_from: string;
+  route_to: string;
+  loading_date: string | null;
+  unloading_date: string | null;
+  loading_date_from: string | null;
+  loading_date_to: string | null;
+  unloading_date_from: string | null;
+  unloading_date_to: string | null;
+  status: 'new' | 'in_progress' | 'completed' | 'cancelled';
+  status_display: string;
+  invoice_issued: boolean;
+  invoice_received?: boolean;
+  documents_status?: 'not_received' | 'waiting' | 'received';
+  documents_status_display?: string;
+  invoice_received_date?: string | null;
+  payment_days?: number | null;
+  due_date?: string | null;
+  payment_status: 'not_paid' | 'partially_paid' | 'paid';
+  payment_status_display: string;
+  payment_date?: string | null;
+  payment_status_info?: {
+    status: 'not_paid' | 'partially_paid' | 'paid';
+    message: string;
+    payment_date?: string;
+  };
+  notes: string;
+  documents?: ExpeditionDocument[];
+};
+
+interface PurchaseInvoice {
+  id: number;
+  invoice_number: string | null;
+  received_invoice_number: string;
+  partner: Client;
+  partner_id: number;
+  related_order: OrdersPageOrder | null;
+  related_order_id: number | null;
+  expense_category: { id: number; name: string } | null;
+  expense_category_id: number | null;
+  payment_status: 'unpaid' | 'paid' | 'overdue' | 'partially_paid';
+  payment_status_display: string;
+  amount_net: string;
+  vat_rate: string;
+  amount_total: string;
+  issue_date: string;
+  received_date: string | null;
+  due_date: string;
+  payment_date: string | null;
+  invoice_file: string | null;
+  invoice_file_url?: string | null;
+  overdue_days: number;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const OrdersPage: React.FC = () => {
+  const { t, i18n } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { getPaymentColor, getOrderColor } = useUISettings();
+  const [orders, setOrders] = useState<OrdersPageOrder[]>([]);
+  const [totalOrdersCount, setTotalOrdersCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showNewEditModal, setShowNewEditModal] = useState(false);
+  const [editingOrder, setEditingOrder] = useState<OrdersPageOrder | null>(null);
+  const [showOrderDetails, setShowOrderDetails] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<OrdersPageOrder | null>(null);
+  const [showRouteMap, setShowRouteMap] = useState(false);
+  const [selectedOrderInvoices, setSelectedOrderInvoices] = useState<Array<{ id: number; invoice_number: string; issue_date: string | null; amount_total: string }>>([]);
+  const [carrierPurchaseInvoices, setCarrierPurchaseInvoices] = useState<{ [carrierId: number]: Array<{ id: number; invoice_number: string | null; received_invoice_number: string; issue_date: string | null; amount_total: string }> }>({});
+  const [showPurchaseInvoiceDetails, setShowPurchaseInvoiceDetails] = useState(false);
+  const [selectedPurchaseInvoice, setSelectedPurchaseInvoice] = useState<PurchaseInvoice | null>(null);
+  const [filterStatus, setFilterStatus] = useState<string>('all');
+  const [showFilters, setShowFilters] = useState<boolean>(false);
+  // Išsaugoti pageSize localStorage, kad išliktų po perkrovimo
+  // Pirmiausia bandyti localStorage, tada UserSettings
+  const [pageSize, setPageSize] = useState<number>(() => {
+    const saved = localStorage.getItem('ordersPageSize');
+    if (saved) return parseInt(saved, 10);
+    // Jei nėra localStorage, naudoti default 100
+    return 100;
+  });
+  const [userSettingsLoaded, setUserSettingsLoaded] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [filters, setFilters] = useState({
+    status: [] as string[],
+    client_id: '',
+    carrier_id: '',
+    order_type: '',
+    route_from: '',
+    route_to: '',
+    order_date_from: '',
+    order_date_to: '',
+    loading_date_from: '',
+    loading_date_to: '',
+    unloading_date_from: '',
+    unloading_date_to: '',
+    manager_id: '',
+  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [allClients, setAllClients] = useState<Client[]>([]);
+  const [allCarriers, setAllCarriers] = useState<Client[]>([]);
+  const [allManagers, setAllManagers] = useState<User[]>([]);
+  const [mailMatchedOrders, setMailMatchedOrders] = useState<Set<string>>(() => new Set());
+  const [mailModalOpen, setMailModalOpen] = useState<boolean>(false);
+  const [mailModalLoading, setMailModalLoading] = useState<boolean>(false);
+  const [mailModalError, setMailModalError] = useState<string | null>(null);
+  const [mailModalMessages, setMailModalMessages] = useState<Array<{
+    id: number;
+    subject: string | null;
+    sender_display?: string;
+    sender?: string;
+    date: string;
+    body_plain?: string;
+    body_html?: string;
+    snippet?: string;
+    attachments?: Array<{
+      id: number;
+      filename: string;
+      file: string | null;
+      download_url?: string | null;
+      content_type: string | null;
+      size: number;
+      created_at?: string;
+    }>;
+  }>>([]);
+  const [mailModalOrderNumber, setMailModalOrderNumber] = useState<string>('');
+  const [orderMailCache, setOrderMailCache] = useState<Record<string, Array<{
+    id: number;
+    subject: string | null;
+    sender_display?: string;
+    sender?: string;
+    date: string;
+    body_plain?: string;
+    body_html?: string;
+    snippet?: string;
+    attachments?: Array<{
+      id: number;
+      filename: string;
+      file: string | null;
+      download_url?: string | null;
+      content_type: string | null;
+      size: number;
+      created_at?: string;
+    }>;
+  }>>>({});
+  const [attachmentPreview, setAttachmentPreview] = useState<{ filename: string; url: string; mailMessageId?: number } | null>(null);
+  const [htmlPreview, setHtmlPreview] = useState<HTMLPreview | null>(null);
+  const [htmlPreviewOrderId, setHtmlPreviewOrderId] = useState<number | null>(null);
+  const [htmlPreviewLang, setHtmlPreviewLang] = useState<string>('lt');
+
+  const fetchHtmlPreview = async (id: number, lang: string = 'lt') => {
+    try {
+      const response = await api.get(`/orders/orders/${id}/preview/`, {
+        params: { lang },
+        responseType: 'text',
+      });
+      setHtmlPreview({
+        title: `Užsakymo sutartis ${id}`, // Pavadinimas bus patikslintas kviečiant
+        htmlContent: response.data
+      });
+      setHtmlPreviewOrderId(id);
+      setHtmlPreviewLang(lang);
+    } catch (error: any) {
+      showToast('error', 'Nepavyko atidaryti peržiūros');
+    }
+  };
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string; visible: boolean }>({ type: 'info', message: '', visible: false });
+  const toastTimeoutRef = useRef<number | null>(null);
+  const prevFiltersRef = useRef(filters);
+  const prevFilterStatusRef = useRef(filterStatus);
+  const prevPageSizeRef = useRef(pageSize);
+  const showToast = useCallback((type: 'success' | 'error' | 'info', message: string, timeoutMs = 3500) => {
+    setToast({ type, message, visible: true });
+    if (toastTimeoutRef.current !== null) {
+      window.clearTimeout(toastTimeoutRef.current);
+    }
+    toastTimeoutRef.current = window.setTimeout(() => setToast((t) => ({ ...t, visible: false })), timeoutMs);
+  }, []);
+  
+  // Cleanup toast timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
+  const [confirmState, setConfirmState] = useState<{ 
+    open: boolean; 
+    title?: string; 
+    message?: string; 
+    onConfirm?: () => void;
+    showDeleteOptions?: boolean;
+    salesCount?: number;
+    purchaseCount?: number;
+    salesInvoices?: Array<{
+      id: number;
+      invoice_number?: string | null;
+      invoice_type?: string | null;
+      amount_total?: string | number | null;
+      issue_date?: string | null;
+    }>;
+    purchaseInvoices?: Array<{
+      id: number;
+      invoice_number?: string | null;
+      received_invoice_number: string;
+      amount_total?: string | number | null;
+      issue_date?: string | null;
+      linked_via_related_order?: boolean;
+      linked_via_related_orders?: boolean;
+      related_orders?: Array<{ id: number; order_number?: string | null }>;
+    }>;
+    currentOrderId?: number | null;
+    onDeleteWithInvoices?: () => void;
+    onDeleteWithoutInvoices?: () => void;
+    expeditionCount?: number;
+    expeditions?: Array<{
+      id?: number | null;
+      expedition_number?: string | null;
+      partner_name?: string | null;
+      carrier_type_display?: string | null;
+      status_display?: string | null;
+    }>;
+  }>({ open: false });
+  const [filterClientSearch, setFilterClientSearch] = useState('');
+  const [filterCarrierSearch, setFilterCarrierSearch] = useState('');
+  const [filterClients, setFilterClients] = useState<Client[]>([]);
+  const [filterCarriers, setFilterCarriers] = useState<Client[]>([]);
+  const [showFilterClientDropdown, setShowFilterClientDropdown] = useState(false);
+  const [showFilterCarrierDropdown, setShowFilterCarrierDropdown] = useState(false);
+  const formatInvoiceAmount = useCallback((value: string | number | null | undefined) => {
+    if (value === null || value === undefined || value === '') {
+      return 'Nenurodyta';
+    }
+    const numeric = typeof value === 'number' ? value : parseFloat(value);
+    if (!Number.isNaN(numeric)) {
+      return `${numeric.toFixed(2)} €`;
+    }
+    return `${value} €`;
+  }, []);
+
+  const [routeFromSuggestions, setRouteFromSuggestions] = useState<string[]>([]);
+  const [routeToSuggestions, setRouteToSuggestions] = useState<string[]>([]);
+
+
+  const fetchMailMatchSummary = useCallback(async () => {
+    try {
+      const response = await api.get('/mail/messages/match-summary/');
+      const orderNumbers: string[] = Array.isArray(response.data?.order_numbers)
+        ? response.data.order_numbers
+        : [];
+      setMailMatchedOrders(new Set(orderNumbers.map((value) => String(value).trim().toUpperCase())));
+    } catch (summaryError) {
+      console.warn('Nepavyko gauti pašto sutapimų santraukos:', summaryError);
+      setMailMatchedOrders(new Set());
+    }
+  }, []);
+
+  const formatDateTime = useCallback((value?: string | null, withTime = true): string => {
+    if (!value) {
+      return '-';
+    }
+    try {
+      const date = new Date(value);
+      if (isNaN(date.getTime())) {
+        return value;
+      }
+      if (withTime) {
+        return date.toLocaleString('lt-LT', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+      }
+      return date.toLocaleDateString('lt-LT');
+    } catch {
+      return value;
+    }
+  }, []);
+
+  const fetchMailMessagesForOrder = useCallback(
+    async (orderNumber: string): Promise<Array<{
+      id: number;
+      subject: string | null;
+      sender_display?: string;
+      sender?: string;
+      date: string;
+      body_plain?: string;
+      body_html?: string;
+      snippet?: string;
+      attachments?: Array<{
+        id: number;
+        filename: string;
+        file: string | null;
+        download_url?: string | null;
+        content_type: string | null;
+        size: number;
+        created_at?: string;
+      }>;
+    }>> => {
+      const normalized = orderNumber.trim().toUpperCase();
+      if (!normalized) {
+        return [];
+      }
+
+      if (orderMailCache[normalized]) {
+        return orderMailCache[normalized];
+      }
+
+      const response = await api.get('/mail/messages/by-order/', {
+        params: { number: normalized },
+      });
+      const messages: Array<{
+        id: number;
+        subject: string | null;
+        sender_display?: string;
+        sender?: string;
+        date: string;
+        body_plain?: string;
+        body_html?: string;
+        snippet?: string;
+        attachments?: Array<{
+          id: number;
+          filename: string;
+          file: string | null;
+          download_url?: string | null;
+          content_type: string | null;
+          size: number;
+          created_at?: string;
+        }>;
+      }> = Array.isArray(response.data?.messages)
+        ? response.data.messages
+        : [];
+      setOrderMailCache((prev) => ({ ...prev, [normalized]: messages }));
+      return messages;
+    },
+    [orderMailCache]
+  );
+
+  const handleOpenMailModal = useCallback(async (orderNumber: string) => {
+    const normalized = orderNumber.trim().toUpperCase();
+    if (!normalized) {
+      return;
+    }
+    setMailModalOrderNumber(normalized);
+    setMailModalOpen(true);
+    setMailModalLoading(true);
+    setMailModalError(null);
+    setMailModalMessages([]);
+
+    try {
+      const messages = await fetchMailMessagesForOrder(normalized);
+      setMailModalMessages(messages);
+    } catch (err: any) {
+      console.error('Nepavyko gauti laiškų užsakymui:', err);
+      setMailModalError(err?.response?.data?.detail || err.message || 'Nepavyko gauti su užsakymu susijusių laiškų.');
+    } finally {
+      setMailModalLoading(false);
+    }
+  }, [fetchMailMessagesForOrder]);
+
+  const handleCloseMailModal = useCallback(() => {
+    setMailModalOpen(false);
+    setMailModalMessages([]);
+    setMailModalError(null);
+  }, []);
+
+
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const fetchAllClients = useCallback(async () => {
+    try {
+      const response = await api.get('/partners/partners/', {
+        params: { is_client: true, page_size: 200 }
+      });
+      const clientsData = response.data.results || response.data || [];
+      setAllClients(Array.isArray(clientsData) ? clientsData : []);
+    } catch (error) {
+      setAllClients([]);
+    }
+  }, []);
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const fetchAllCarriers = useCallback(async () => {
+    try {
+      const response = await api.get('/partners/partners/', {
+        params: { page_size: 200 }
+      });
+      const carriersData = response.data.results || response.data || [];
+      setAllCarriers(Array.isArray(carriersData) ? carriersData : []);
+    } catch (error) {
+      setAllCarriers([]);
+    }
+  }, []);
+
+  const searchFilterClients = useCallback(async (query: string) => {
+    if (query.length < 1) {
+      setFilterClients([]);
+      return;
+    }
+    try {
+      const response = await api.get('/partners/partners/', {
+        params: { 
+          search: query, 
+          is_client: true, 
+          page_size: 10 
+        }
+      });
+      const clients = response.data.results || response.data || [];
+      setFilterClients(Array.isArray(clients) ? clients : []);
+    } catch (error) {
+      setFilterClients([]);
+    }
+  }, []);
+
+  const searchFilterCarriers = useCallback(async (query: string) => {
+    if (query.length < 1) {
+      setFilterCarriers([]);
+      return;
+    }
+    try {
+      const response = await api.get('/partners/partners/', {
+        params: { 
+          search: query, 
+          page_size: 10 
+        }
+      });
+      const carriers = response.data.results || response.data || [];
+      setFilterCarriers(Array.isArray(carriers) ? carriers : []);
+    } catch (error) {
+      setFilterCarriers([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (filterClientSearch) {
+      const timeout = setTimeout(() => searchFilterClients(filterClientSearch), 300);
+      return () => clearTimeout(timeout);
+    } else {
+      setFilterClients([]);
+    }
+  }, [filterClientSearch, searchFilterClients]);
+
+  useEffect(() => {
+    if (filterCarrierSearch) {
+      const timeout = setTimeout(() => searchFilterCarriers(filterCarrierSearch), 300);
+      return () => clearTimeout(timeout);
+    } else {
+      setFilterCarriers([]);
+    }
+  }, [filterCarrierSearch, searchFilterCarriers]);
+
+  useEffect(() => {
+    // Nustatyti kliento pavadinimą, kai pasirenkamas klientas
+    if (filters.client_id) {
+      const client = allClients.find(c => c.id.toString() === filters.client_id);
+      if (client) {
+        setFilterClientSearch(client.name);
+      }
+    }
+  }, [filters.client_id, allClients]);
+
+  useEffect(() => {
+    // Nustatyti vežėjo pavadinimą, kai pasirenkamas vežėjas
+    if (filters.carrier_id) {
+      const carrier = allCarriers.find(c => c.id.toString() === filters.carrier_id);
+      if (carrier) {
+        setFilterCarrierSearch(carrier.name);
+      }
+    }
+  }, [filters.carrier_id, allCarriers]);
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const fetchAllManagers = useCallback(async () => {
+    try {
+      const response = await api.get('/auth/users/', {
+        params: { page_size: 200 }
+      });
+      const managersData = response.data.results || response.data || [];
+      setAllManagers(Array.isArray(managersData) ? managersData : []);
+    } catch (error) {
+      setAllManagers([]);
+    }
+  }, []);
+
+  const fetchRouteSuggestions = async () => {
+    try {
+      // Gauti visus miestus/lokacijas iš API
+      const citiesResponse = await api.get('/orders/cities/', {
+        params: { page_size: 500 }
+      });
+      const cities = citiesResponse.data.results || citiesResponse.data || [];
+      const cityNames = cities.map((city: any) => city.name).sort();
+      
+      setRouteFromSuggestions(cityNames);
+      setRouteToSuggestions(cityNames);
+    } catch (error) {
+    }
+  };
+
+  const fetchOrders = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params: any = { page_size: pageSize, page: currentPage };
+      
+      // Jei naudojami nauji filtrai
+      if (filters.status.length > 0) {
+        params.status = filters.status[0];
+      } else if (filterStatus !== 'all') {
+        params.status = filterStatus;
+      }
+      
+      if (filters.client_id) {
+        params.client = filters.client_id;
+      }
+      if (filters.carrier_id) {
+        params.carrier = filters.carrier_id;
+      }
+      if (filters.order_type) {
+        params.order_type = filters.order_type;
+      }
+      if (filters.route_from) {
+        params.route_from = filters.route_from;
+      }
+      if (filters.route_to) {
+        params.route_to = filters.route_to;
+      }
+      if (filters.order_date_from) {
+        params.order_date__gte = filters.order_date_from;
+      }
+      if (filters.order_date_to) {
+        params.order_date__lte = filters.order_date_to;
+      }
+      if (filters.loading_date_from) {
+        params.loading_date__gte = filters.loading_date_from;
+      }
+      if (filters.loading_date_to) {
+        params.loading_date__lte = filters.loading_date_to;
+      }
+      if (filters.unloading_date_from) {
+        params.unloading_date__gte = filters.unloading_date_from;
+      }
+      if (filters.unloading_date_to) {
+        params.unloading_date__lte = filters.unloading_date_to;
+      }
+      if (filters.manager_id) {
+        params.manager = filters.manager_id;
+      }
+      if (searchQuery && searchQuery.trim()) {
+        params.search = searchQuery.trim();
+      }
+
+      params.ordering = '-order_number';
+      
+      const response = await api.get('/orders/orders/', { params });
+      
+      // Properly handle paginated and non-paginated responses
+      let ordersList: OrdersPageOrder[] = [];
+      if (Array.isArray(response.data)) {
+        ordersList = response.data;
+        setTotalOrdersCount(ordersList.length);
+        setTotalPages(1);
+      } else if (response.data.results && Array.isArray(response.data.results)) {
+        ordersList = response.data.results;
+        // Išsaugoti total count ir apskaičiuoti puslapių skaičių
+        if (response.data.count !== undefined) {
+          setTotalOrdersCount(response.data.count);
+          const calculatedTotalPages = Math.ceil(response.data.count / pageSize);
+          setTotalPages(calculatedTotalPages);
+        }
+      } else if (response.data.data && Array.isArray(response.data.data)) {
+        ordersList = response.data.data;
+        setTotalOrdersCount(ordersList.length);
+        setTotalPages(1);
+      }
+      
+      setOrders(ordersList.map(normalizeOrderData));
+    } catch (error: any) {
+      if (error.response?.status === 401) {
+        showToast('info', 'Reikia prisijungti');
+      } else {
+        showToast('error', 'Klaida užkraunant užsakymus: ' + (error.response?.data?.detail || error.message || 'Nežinoma klaida'));
+      }
+      setOrders([]);
+      setTotalOrdersCount(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [filters, filterStatus, pageSize, currentPage, searchQuery, showToast]);
+
+  // Automatinis persikrovimas pašalintas - vartotojas gali pats persikrauti, jei reikia
+
+  // Gauti UserSettings ir nustatyti pageSize (jei nėra localStorage)
+  useEffect(() => {
+    const fetchUserSettings = async () => {
+      try {
+        const response = await api.get('/settings/user/my_settings/');
+        if (response.data && response.data.items_per_page) {
+          const savedPageSize = localStorage.getItem('ordersPageSize');
+          // Jei nėra localStorage, naudoti UserSettings
+          if (!savedPageSize) {
+            const userPageSize = response.data.items_per_page;
+            setPageSize(userPageSize);
+            localStorage.setItem('ordersPageSize', userPageSize.toString());
+          }
+        }
+        setUserSettingsLoaded(true);
+      } catch (error) {
+        // Ignoruoti klaidas
+        setUserSettingsLoaded(true);
+      }
+    };
+    fetchUserSettings();
+  }, []);
+
+  // Optimizuotas: sujungti mount ir filter changes į vieną useEffect
+  const isFirstMount = useRef(true);
+  useEffect(() => {
+    if (isFirstMount.current && userSettingsLoaded) {
+      // Pirmą kartą užkrovus puslapį - užkrauti visus duomenis (tik kai UserSettings užkrauti)
+      isFirstMount.current = false;
+      fetchOrders();
+      fetchMailMatchSummary();
+      fetchRouteSuggestions();
+      fetchAllClients();
+      fetchAllCarriers();
+      fetchAllManagers();
+    } else if (!isFirstMount.current) {
+      // Kai keičiasi filtrai - užkrauti tik užsakymus
+      fetchOrders();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterStatus, filters, pageSize, userSettingsLoaded, currentPage, searchQuery]);
+  
+  // Reset currentPage į 1, kai keičiasi filtrai arba pageSize (bet ne currentPage)
+  const prevSearchQueryRef = useRef(searchQuery);
+  useEffect(() => {
+    const filtersChanged = JSON.stringify(prevFiltersRef.current) !== JSON.stringify(filters);
+    const filterStatusChanged = prevFilterStatusRef.current !== filterStatus;
+    const pageSizeChanged = prevPageSizeRef.current !== pageSize;
+    const searchQueryChanged = prevSearchQueryRef.current !== searchQuery;
+    
+    if ((filtersChanged || filterStatusChanged || pageSizeChanged || searchQueryChanged) && currentPage !== 1) {
+      setCurrentPage(1);
+    }
+    
+    prevFiltersRef.current = filters;
+    prevFilterStatusRef.current = filterStatus;
+    prevPageSizeRef.current = pageSize;
+    prevSearchQueryRef.current = searchQuery;
+  }, [filters, filterStatus, pageSize, searchQuery, currentPage]);
+
+  // Handle URL parameter to open order details
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const orderId = params.get('order_id');
+    
+    if (orderId && orders.length > 0) {
+      const order = orders.find(o => o.id === parseInt(orderId));
+      if (order) {
+        handleViewOrder(order);
+        // Išvalyti URL
+        navigate('/orders', { replace: true });
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search, orders, navigate]);
+
+  // Klausyti salesInvoiceDeleted event'o, kad atnaujintų užsakymų sąrašą po sąskaitos ištrynimo
+  useEffect(() => {
+    const handleSalesInvoiceDeleted = () => {
+      // Atnaujinti užsakymų sąrašą, kad atsinaujintų client_invoice_issued flag'ai
+      fetchOrders();
+    };
+
+    window.addEventListener('salesInvoiceDeleted', handleSalesInvoiceDeleted);
+    return () => {
+      window.removeEventListener('salesInvoiceDeleted', handleSalesInvoiceDeleted);
+    };
+  }, [fetchOrders]);
+
+
+
+  const handleEditOrder = async (order: OrdersPageOrder) => {
+    // handleEditOrderNew(order); // Naikinimui - nukreipiame į naują
+    handleEditOrderNew(order);
+    /* 
+    setEditingOrder(order);
+    setShowEditModal(true);
+    
+    // Užkrauti pasiūlymus, jei dar nėra užkrauti (filtrams)
+    if (routeFromSuggestions.length === 0) {
+      fetchRouteSuggestions();
+    }
+    */
+  };
+
+  const handleEditOrderNew = async (order: OrdersPageOrder) => {
+    setEditingOrder(order);
+    setShowNewEditModal(true);
+    
+    // Užkrauti pasiūlymus, jei dar nėra užkrauti (filtrams)
+    if (routeFromSuggestions.length === 0) {
+      fetchRouteSuggestions();
+    }
+  };
+
+  const handleCreateOrder = () => {
+    // handleCreateOrderNew(); // Naikinimui - nukreipiame į naują
+    handleCreateOrderNew();
+    /*
+    setEditingOrder(null);
+    setShowEditModal(true);
+    */
+  };
+
+  const handleCreateOrderNew = () => {
+    setEditingOrder(null);
+    setShowNewEditModal(true);
+  };
+
+  const handleOrderSaved = (order: OrdersPageOrder) => {
+    const normalized = normalizeOrderData(order);
+    // Atnaujinti sąrašą
+    setOrders(prevOrders => {
+      const existingIndex = prevOrders.findIndex(o => o.id === normalized.id);
+      if (existingIndex >= 0) {
+        // Atnaujinti esamą užsakymą
+        const updated = [...prevOrders];
+        updated[existingIndex] = normalized;
+        return updated;
+      } else {
+        // Pridėti naują užsakymą
+        return [normalized, ...prevOrders];
+      }
+    });
+    // Atnaujinti total count, jei naujas užsakymas
+    if (!orders.find(o => o.id === normalized.id)) {
+      setTotalOrdersCount(prev => prev !== null ? prev + 1 : null);
+    }
+    fetchOrders(); // Atnaujinti visą sąrašą
+    setShowEditModal(false);
+    setShowNewEditModal(false);
+    setEditingOrder(null);
+  };
+
+  const fetchOrderCarriers = async (orderId: number): Promise<OrdersPageCarrier[]> => {
+    try {
+      const response = await api.get(`/orders/carriers/?order=${orderId}`);
+      const carriers = response.data.results || response.data || [];
+      return carriers.map(normalizeCarrier);
+    } catch (error) {
+      return [];
+    }
+  };
+
+  const handleEditFromDetails = () => {
+    if (selectedOrder) {
+      handleEditOrderNew(selectedOrder);
+      setShowOrderDetails(false);
+    }
+  };
+
+
+  const handleChangeStatus = async (orderId: number, newStatus: string) => {
+    try {
+      await api.post(`/orders/orders/${orderId}/change_status/`, {
+        new_status: newStatus,
+        notes: '',
+      });
+      fetchOrders();
+      showToast('success', 'Statusas sėkmingai pakeistas');
+    } catch (error: any) {
+      showToast('error', error.response?.data?.error || 'Klaida keičiant statusą');
+    }
+  };
+
+  const handleDeleteOrder = async (id: number) => {
+    let expeditionCount = 0;
+    let expeditionSummaries: Array<{
+      id?: number | null;
+      expedition_number?: string | null;
+      partner_name?: string | null;
+      carrier_type_display?: string | null;
+      status_display?: string | null;
+    }> = [];
+    let hasExpeditions = false;
+
+    const applyExpeditions = (carriersInput: any) => {
+      if (!Array.isArray(carriersInput)) {
+        return;
+      }
+      const normalizedCarriers = carriersInput.map(normalizeCarrier);
+      if (normalizedCarriers.length === 0) {
+        return;
+      }
+      expeditionCount = normalizedCarriers.length;
+      hasExpeditions = expeditionCount > 0;
+      expeditionSummaries = normalizedCarriers.map((carrier) => ({
+        id: carrier.id ?? carrier.order ?? null,
+        expedition_number: carrier.expedition_number || null,
+        partner_name: carrier.partner?.name || null,
+        carrier_type_display: carrier.carrier_type_display || null,
+        status_display: carrier.status_display || null,
+      }));
+    };
+
+    try {
+      // Pirmiau patikrinti ar yra susijusių sąskaitų
+      let invoicesInfo;
+      let hasInvoices = false;
+      let salesCount = 0;
+      let purchaseCount = 0;
+
+      const existingOrder = orders.find((orderItem) => orderItem.id === id);
+      if (existingOrder?.carriers && existingOrder.carriers.length > 0) {
+        applyExpeditions(existingOrder.carriers);
+      } else {
+        try {
+          const orderDetailsResponse = await api.get(`/orders/orders/${id}/`);
+          applyExpeditions(orderDetailsResponse.data?.carriers);
+        } catch (expeditionError) {
+          console.warn('Nepavyko gauti ekspedicijų informacijos:', expeditionError);
+        }
+      }
+      
+      try {
+        invoicesInfo = await api.get(`/orders/orders/${id}/related-invoices-info/`);
+        hasInvoices = invoicesInfo.data.has_related_invoices;
+        salesCount = invoicesInfo.data.sales_invoices_count || 0;
+        purchaseCount = invoicesInfo.data.purchase_invoices_count || 0;
+      } catch (statError: any) {
+        // Jei nepavyko užkrauti statistikos, tęsiame be jos
+        // Vartotojui parodysime paprastą patvirtinimą
+        showToast('info', 'Nepavyko užkrauti statistikos. Tęsiame trinimą.');
+      }
+      
+      if (hasInvoices) {
+        const infoData = invoicesInfo?.data || {};
+        const salesInvoicesList = Array.isArray(infoData.sales_invoices) ? infoData.sales_invoices : [];
+        const purchaseInvoicesList = Array.isArray(infoData.purchase_invoices) ? infoData.purchase_invoices : [];
+        const expeditionNote = hasExpeditions
+          ? `\n\nDėmesio: užsakymas turi susijusių ekspedicijų (${expeditionCount}). Jas ištrinant užsakymą sistema pašalins automatiškai.`
+          : '';
+
+        setConfirmState({
+          open: true,
+          title: 'Patvirtinkite trinimą',
+          message: `Šis užsakymas turi susijusių sąskaitų. Pasirinkite, ką norite daryti su sąskaitomis.${expeditionNote}`,
+          showDeleteOptions: true,
+          salesCount,
+          purchaseCount,
+          salesInvoices: salesInvoicesList,
+          purchaseInvoices: purchaseInvoicesList,
+          currentOrderId: id,
+          expeditionCount,
+          expeditions: expeditionSummaries,
+          onDeleteWithInvoices: async () => {
+            try {
+              await api.delete(`/orders/orders/${id}/`, {
+                data: { delete_invoices: 'true' }
+              });
+              if (editingOrder && editingOrder.id === id) {
+                setShowEditModal(false);
+                setEditingOrder(null);
+              }
+              await fetchOrders();
+              showToast('success', 'Užsakymas ir visos susijusios sąskaitos sėkmingai ištrintos');
+              setConfirmState({ open: false });
+            } catch (error: any) {
+              const errorMsg = error.response?.data?.detail || 
+                             error.response?.data?.error || 
+                             (typeof error.response?.data === 'string' ? error.response?.data : null) ||
+                             error.message || 
+                             'Klaida trinant užsakymą';
+              showToast('error', errorMsg);
+              setConfirmState({ open: false });
+            }
+          },
+          onDeleteWithoutInvoices: async () => {
+            try {
+              await api.delete(`/orders/orders/${id}/`, {
+                data: { delete_invoices: 'false' }
+              });
+              if (editingOrder && editingOrder.id === id) {
+                setShowEditModal(false);
+                setEditingOrder(null);
+              }
+              await fetchOrders();
+              showToast('success', 'Užsakymas sėkmingai ištrintas. Sąskaitos paliktos.');
+              setConfirmState({ open: false });
+            } catch (error: any) {
+              const errorMsg = error.response?.data?.detail || 
+                             error.response?.data?.error || 
+                             (typeof error.response?.data === 'string' ? error.response?.data : null) ||
+                             error.message || 
+                             'Klaida trinant užsakymą';
+              showToast('error', errorMsg);
+              setConfirmState({ open: false });
+            }
+          }
+        });
+      } else {
+        // Nėra susijusių sąskaitų - rodyti paprastą patvirtinimą
+        const expeditionNote = hasExpeditions
+          ? `\n\nDėmesio: užsakymas turi susijusių ekspedicijų (${expeditionCount}). Jas ištrinant užsakymą sistema pašalins automatiškai.`
+          : '';
+        setConfirmState({
+          open: true,
+          title: 'Patvirtinkite',
+          message: `Ar tikrai norite ištrinti užsakymą?${expeditionNote}`,
+          showDeleteOptions: false,
+          expeditionCount,
+          expeditions: expeditionSummaries,
+          onConfirm: async () => {
+            try {
+              await api.delete(`/orders/orders/${id}/`);
+              if (editingOrder && editingOrder.id === id) {
+                setShowEditModal(false);
+                setEditingOrder(null);
+              }
+              await fetchOrders();
+              showToast('success', 'Užsakymas sėkmingai ištrintas');
+              setConfirmState({ open: false });
+            } catch (error: any) {
+              const errorMsg = error.response?.data?.detail || 
+                             error.response?.data?.error || 
+                             (typeof error.response?.data === 'string' ? error.response?.data : null) ||
+                             error.message || 
+                             'Klaida trinant užsakymą';
+              showToast('error', errorMsg);
+              setConfirmState({ open: false });
+            }
+          }
+        });
+      }
+    } catch (error: any) {
+      // Jei nepavyko gauti informacijos apie sąskaitas, rodyti paprastą dialogą
+      const expeditionNote = hasExpeditions
+        ? `\n\nDėmesio: užsakymas turi susijusių ekspedicijų (${expeditionCount}). Jas ištrinant užsakymą sistema pašalins automatiškai.`
+        : '';
+      setConfirmState({
+        open: true,
+        title: 'Patvirtinkite',
+        message: `Ar tikrai norite ištrinti užsakymą?${expeditionNote}`,
+        showDeleteOptions: false,
+        expeditionCount,
+        expeditions: expeditionSummaries,
+        onConfirm: async () => {
+          try {
+            await api.delete(`/orders/orders/${id}/`);
+            if (editingOrder && editingOrder.id === id) {
+              setShowEditModal(false);
+              setEditingOrder(null);
+            }
+            await fetchOrders();
+            showToast('success', 'Užsakymas sėkmingai ištrintas');
+            setConfirmState({ open: false });
+          } catch (error: any) {
+            const errorMsg = error.response?.data?.detail || 
+                           error.response?.data?.error || 
+                           (typeof error.response?.data === 'string' ? error.response?.data : null) ||
+                           error.message || 
+                           'Klaida trinant užsakymą';
+            showToast('error', errorMsg);
+            setConfirmState({ open: false });
+          }
+        }
+      });
+    }
+  };
+
+
+  const handleViewOrder = async (order: OrdersPageOrder) => {
+    // Naikinimui - dabar peržiūra yra tas pats naujas modalas
+    handleEditOrderNew(order);
+    /*
+    // Užkrauti pilnus vežėjų/sandėlių duomenis
+    const carriers = await fetchOrderCarriers(order.id);
+    
+    // Užkrauti cargo items
+    let cargoItems: CargoItem[] = [];
+    try {
+      const cargoResponse = await api.get(`/orders/cargo-items/?order=${order.id}`);
+      const cargoResults = cargoResponse.data.results || cargoResponse.data || [];
+      cargoItems = cargoResults;
+    } catch (e) {
+      // Jei cargo_items jau yra order objekte, naudoti juos
+      if (order.cargo_items && Array.isArray(order.cargo_items)) {
+        cargoItems = order.cargo_items;
+      }
+    }
+    
+    // Užkrauti pilnus užsakymo duomenis iš API (kad gautume visus laukus)
+    let fullOrderData = normalizeOrderData(order);
+    try {
+      const orderResponse = await api.get(`/orders/orders/${order.id}/`);
+      fullOrderData = normalizeOrderData(orderResponse.data);
+    } catch (e) {
+    }
+    
+    setSelectedOrder({
+      ...fullOrderData,
+      carriers: carriers.length > 0 ? carriers : (fullOrderData.carriers || []),
+      cargo_items: cargoItems.length > 0 ? cargoItems : (fullOrderData.cargo_items || order.cargo_items || [])
+    });
+    setShowOrderDetails(true);
+    
+    try {
+      // Gauti sales invoices
+      const response = await api.get('/invoices/sales/', { params: { related_order: order.id, page_size: 100 } });
+      const results = response.data.results || response.data;
+      const filtered = (results || []).filter((inv: any) => inv.related_order && (inv.related_order.id === order.id || inv.related_order === order.id));
+      setSelectedOrderInvoices(filtered.map((inv: any) => ({ id: inv.id, invoice_number: inv.invoice_number, issue_date: inv.issue_date, amount_total: String(inv.amount_total) })));
+      
+      // Gauti purchase invoices kiekvienam vežėjui
+      const finalCarriers = carriers.length > 0 ? carriers : order.carriers || [];
+      const invoicesMap: { [carrierId: number]: Array<{ id: number; invoice_number: string | null; received_invoice_number: string; issue_date: string | null; amount_total: string }> } = {};
+      for (const carrier of finalCarriers) {
+        if (carrier.id && carrier.partner) {
+          try {
+            const purchaseResponse = await api.get('/invoices/purchase/', {
+              params: {
+                related_order: order.id,
+                partner: carrier.partner?.id || '',
+                page_size: 100
+              }
+            });
+            const purchaseResults = purchaseResponse.data.results || purchaseResponse.data || [];
+            const purchaseFiltered = (purchaseResults || []).filter((inv: any) => 
+              inv.related_order && 
+              (inv.related_order.id === order.id || inv.related_order === order.id) &&
+              inv.partner &&
+              (inv.partner.id === carrier.partner.id || inv.partner === carrier.partner.id)
+            );
+            invoicesMap[carrier.id] = purchaseFiltered.map((inv: any) => ({ 
+              id: inv.id, 
+              invoice_number: inv.invoice_number,
+              received_invoice_number: inv.received_invoice_number,
+              issue_date: inv.issue_date, 
+              amount_total: String(inv.amount_total) 
+            }));
+          } catch (e) {
+            invoicesMap[carrier.id] = [];
+          }
+        }
+      }
+      setCarrierPurchaseInvoices(invoicesMap);
+    } catch (e) {
+      setSelectedOrderInvoices([]);
+      setCarrierPurchaseInvoices({});
+    }
+    */
+  };
+
+  // Helper funkcijos maršrutams
+  const getRouteFromAddress = useCallback((order: OrdersPageOrder | null): string => {
+    if (!order) return '';
+    if (order.route_from_country) {
+      return [order.route_from_country, order.route_from_postal_code, order.route_from_city, order.route_from_address].filter(Boolean).join(', ');
+    }
+    return order.route_from || '';
+  }, []);
+
+  const getRouteToAddress = useCallback((order: OrdersPageOrder | null): string => {
+    if (!order) return '';
+    if (order.route_to_country) {
+      return [order.route_to_country, order.route_to_postal_code, order.route_to_city, order.route_to_address].filter(Boolean).join(', ');
+    }
+    return order.route_to || '';
+  }, []);
+
+  // Apskaičiuoti maršruto adresus žemėlapiui
+  const getMapRouteData = () => {
+    if (!showRouteMap || !selectedOrder) return null;
+    
+    const routeFrom = getRouteFromAddress(selectedOrder);
+    const routeTo = getRouteToAddress(selectedOrder);
+    
+    if (!routeFrom && !routeTo) return null;
+    
+    return {
+      from: routeFrom,
+      to: routeTo,
+      fromDisplay: routeFrom || 'Nenurodytas',
+      toDisplay: routeTo || 'Nenurodytas'
+    };
+  };
+  
+  const mapRouteData = getMapRouteData();
+
+  const ordersCountLabel = totalOrdersCount !== null
+    ? `Rodome ${orders.length} iš ${totalOrdersCount} užsakymų`
+    : `Rodome ${orders.length} užsakymus`;
+
+
+
+  return (
+    <div className="page">
+      <div className="container">
+        {toast.visible && (
+          <div style={{
+            position: 'fixed', top: '20%', left: '50%', transform: 'translateX(-50%)', zIndex: 2000,
+            backgroundColor: toast.type === 'success' ? '#28a745' : toast.type === 'error' ? '#dc3545' : '#17a2b8',
+            color: 'white', padding: '12px 18px', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+            maxWidth: '90%', textAlign: 'center'
+          }}>
+            {toast.message}
+          </div>
+        )}
+        {confirmState.open && (
+          <div style={{ position: 'fixed', top:0, left:0, right:0, bottom:0, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', zIndex: 2000 }}>
+            <div className="card" style={{ width: 500 }}>
+              <h3 style={{ marginTop: 0 }}>{confirmState.title || 'Patvirtinkite veiksmą'}</h3>
+              <p style={{ margin: '10px 0 20px', whiteSpace: 'pre-line' }}>{confirmState.message || 'Ar tikrai?'}</p>
+              
+              {confirmState.showDeleteOptions ? (
+                <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+                  <div style={{ fontSize: '14px', color: '#495057', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div>
+                      <strong>Pardavimo sąskaitos:</strong> {confirmState.salesCount ?? 0}
+                      {confirmState.salesInvoices && confirmState.salesInvoices.length > 0 && (
+                        <ul style={{ margin: '6px 0 0 18px', padding: 0, listStyle: 'disc' }}>
+                          {confirmState.salesInvoices.map((invoice) => (
+                            <li key={`sales-invoice-${invoice.id}`} style={{ marginBottom: '4px' }}>
+                              <span style={{ fontWeight: 600 }}>
+                                {invoice.invoice_number || `Sąskaita #${invoice.id}`}
+                              </span>
+                              {invoice.issue_date && (
+                                <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                  ({invoice.issue_date.split('T')[0]})
+                                </span>
+                              )}
+                              {invoice.amount_total && (
+                                <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                  · {formatInvoiceAmount(invoice.amount_total)}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div>
+                      <strong>Pirkimo sąskaitos:</strong> {confirmState.purchaseCount ?? 0}
+                      {confirmState.purchaseInvoices && confirmState.purchaseInvoices.length > 0 && (
+                        <ul style={{ margin: '6px 0 0 18px', padding: 0, listStyle: 'disc' }}>
+                          {confirmState.purchaseInvoices.map((invoice) => {
+                            const relatedOrders = invoice.related_orders || [];
+                            const otherOrders = relatedOrders.filter((orderItem) => orderItem.id !== confirmState.currentOrderId);
+                            const otherOrdersLabel = otherOrders.length > 0
+                              ? otherOrders.map((orderItem) => orderItem.order_number || `#${orderItem.id}`).join(', ')
+                              : '';
+                            const isManualMulti = Boolean(invoice.linked_via_related_orders && !invoice.linked_via_related_order);
+                            const showSharedInfo = (invoice.linked_via_related_orders && otherOrders.length > 0) || isManualMulti;
+                            return (
+                              <li key={`purchase-invoice-${invoice.id}`} style={{ marginBottom: '6px' }}>
+                                <div style={{ fontWeight: 600 }}>
+                                  {invoice.received_invoice_number || invoice.invoice_number || `Sąskaita #${invoice.id}`}
+                                </div>
+                                <div style={{ fontSize: '12px', color: '#6c757d' }}>
+                                  {formatInvoiceAmount(invoice.amount_total)}
+                                  {invoice.issue_date ? ` · ${invoice.issue_date.split('T')[0]}` : ''}
+                                </div>
+                                {showSharedInfo && (
+                                  <div style={{ fontSize: '12px', color: '#d67a00', marginTop: '4px' }}>
+                                    {isManualMulti ? 'Rankiniu būdu priskirta keliems užsakymams' : 'Priskirta keliems užsakymams'}
+                                    {otherOrdersLabel && ` (${otherOrdersLabel})`}
+                                  </div>
+                                )}
+                                {!invoice.linked_via_related_orders && invoice.linked_via_related_order && (
+                                  <div style={{ fontSize: '12px', color: '#6c757d', marginTop: '4px' }}>
+                                    Priskirta tiesiogiai šiam užsakymui.
+                                  </div>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                    {(confirmState.expeditionCount ?? 0) > 0 && (
+                      <div>
+                        <strong>Susijusios ekspedicijos:</strong> {confirmState.expeditionCount}
+                        {confirmState.expeditions && confirmState.expeditions.length > 0 && (
+                          <ul style={{ margin: '6px 0 0 18px', padding: 0, listStyle: 'disc' }}>
+                            {confirmState.expeditions.map((expedition, index) => (
+                              <li key={`expedition-${expedition.id ?? index}`} style={{ marginBottom: '4px' }}>
+                                <span style={{ fontWeight: 600 }}>
+                                  {expedition.expedition_number || `Ekspedicija #${expedition.id ?? index + 1}`}
+                                </span>
+                                {expedition.partner_name && (
+                                  <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                    · {expedition.partner_name}
+                                  </span>
+                                )}
+                                {expedition.carrier_type_display && (
+                                  <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                    · {expedition.carrier_type_display}
+                                  </span>
+                                )}
+                                {expedition.status_display && (
+                                  <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                    · {expedition.status_display}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        <div style={{ fontSize: '12px', color: '#b45309', marginTop: '6px' }}>
+                          Ištrinant užsakymą, susijusios ekspedicijos bus pašalintos automatiškai.
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+                  <button 
+                    className="button" 
+                    style={{ backgroundColor: '#dc3545', color: 'white', width: '100%' }}
+                    onClick={() => confirmState.onDeleteWithInvoices && confirmState.onDeleteWithInvoices()}
+                  >
+                      Ištrinti užsakymą ir visas susijusias sąskaitas ({confirmState.salesCount || 0} pardavimo + {confirmState.purchaseCount || 0} pirkimo)
+                  </button>
+                  <button 
+                    className="button" 
+                    style={{ backgroundColor: '#6c757d', color: 'white', width: '100%' }}
+                    onClick={() => confirmState.onDeleteWithoutInvoices && confirmState.onDeleteWithoutInvoices()}
+                  >
+                    Ištrinti tik užsakymą (sąskaitos paliekamos)
+                  </button>
+                  <button 
+                    className="button button-secondary" 
+                    style={{ width: '100%' }}
+                    onClick={() => setConfirmState({ open:false })}
+                  >
+                    Atšaukti
+                  </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+                  {(confirmState.expeditionCount ?? 0) > 0 && (
+                    <div style={{ marginRight: 'auto', fontSize: '13px', color: '#495057' }}>
+                      <div>
+                        <strong>Susijusios ekspedicijos:</strong> {confirmState.expeditionCount}
+                      </div>
+                      {confirmState.expeditions && confirmState.expeditions.length > 0 && (
+                        <ul style={{ margin: '6px 0 0 18px', padding: 0, listStyle: 'disc' }}>
+                          {confirmState.expeditions.map((expedition, index) => (
+                            <li key={`expedition-${expedition.id ?? index}`} style={{ marginBottom: '4px' }}>
+                              <span style={{ fontWeight: 600 }}>
+                                {expedition.expedition_number || `Ekspedicija #${expedition.id ?? index + 1}`}
+                              </span>
+                              {expedition.partner_name && (
+                                <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                  · {expedition.partner_name}
+                                </span>
+                              )}
+                              {expedition.carrier_type_display && (
+                                <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                  · {expedition.carrier_type_display}
+                                </span>
+                              )}
+                              {expedition.status_display && (
+                                <span style={{ color: '#6c757d', marginLeft: '6px' }}>
+                                  · {expedition.status_display}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                      <div style={{ fontSize: '12px', color: '#b45309', marginTop: '6px' }}>
+                        Ištrinant užsakymą, susijusios ekspedicijos bus pašalintos automatiškai.
+                      </div>
+                    </div>
+                  )}
+                  <button className="button button-secondary" onClick={() => setConfirmState({ open:false })}>Atšaukti</button>
+                  <button className="button" onClick={() => confirmState.onConfirm && confirmState.onConfirm()}>Patvirtinti</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Filters */}
+        <div className="filters-container" style={{ marginBottom: '15px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'nowrap', overflowX: 'auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: '1 1 auto', minWidth: 0, flexWrap: 'nowrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'nowrap' }}>
+                <button
+                  className="filters-toggle-btn"
+                  onClick={() => setShowFilters(!showFilters)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}
+                >
+                  <span className="filters-toggle-icon">{showFilters ? '▼' : '▶'}</span>
+                  {(filters.status.length > 0 || filters.client_id || filters.carrier_id || filters.order_type || 
+                    filters.route_from || filters.route_to || filters.order_date_from || filters.order_date_to ||
+                    filters.loading_date_from || filters.loading_date_to || filters.unloading_date_from || 
+                    filters.unloading_date_to || filters.manager_id || searchQuery) && (
+                    <span className="filters-active-badge">Aktyvūs filtrai</span>
+                  )}
+                </button>
+                {(filters.status.length > 0 || filters.client_id || filters.carrier_id || filters.order_type || 
+                  filters.route_from || filters.route_to || filters.order_date_from || filters.order_date_to ||
+                  filters.loading_date_from || filters.loading_date_to || filters.unloading_date_from || 
+                  filters.unloading_date_to || filters.manager_id || searchQuery) && (
+                  <button
+                    className="filters-clear-btn"
+                    onClick={() => {
+                    setFilters({
+                      status: [],
+                      client_id: '',
+                      carrier_id: '',
+                      order_type: '',
+                      route_from: '',
+                      route_to: '',
+                      order_date_from: '',
+                      order_date_to: '',
+                      loading_date_from: '',
+                      loading_date_to: '',
+                      unloading_date_from: '',
+                      unloading_date_to: '',
+                      manager_id: '',
+                    });
+                    setFilterStatus('all');
+                    setFilterClientSearch('');
+                    setFilterCarrierSearch('');
+                    setFilterClients([]);
+                    setFilterCarriers([]);
+                    setShowFilterClientDropdown(false);
+                    setShowFilterCarrierDropdown(false);
+                    setSearchQuery('');
+                    }}
+                    title="Išvalyti visus filtrus"
+                  >
+                    🗑️ Išvalyti
+                  </button>
+            )}
+          </div>
+              {/* Paieškos laukelis, kai filtrai nėra išskleisti */}
+              {!showFilters && (
+                <input
+                  type="text"
+                  placeholder="🔍 Paieška pagal klientą, maršrutą..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    flex: '1 1 auto',
+                    minWidth: '200px',
+                    maxWidth: '400px',
+                    padding: '6px 10px',
+                    fontSize: '13px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    outline: 'none'
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                    }
+                  }}
+                />
+              )}
+              <div className="quick-filters" style={{ display: 'flex', gap: '6px', flex: '1 1 auto', overflowX: 'auto', padding: '2px 0', flexWrap: 'nowrap', borderTop: 'none', minWidth: 0 }}>
+                <button
+                  className={`quick-filter-btn ${filterStatus === 'all' && filters.status.length === 0 && !filters.order_date_from && !filters.order_date_to ? 'active' : ''}`}
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setFilters({ ...filters, status: [], order_date_from: '', order_date_to: '' });
+                  }}
+                >
+                  🌐 Visi
+                </button>
+                <button
+                  className={`quick-filter-btn ${(() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    return filters.order_date_from === today && filters.order_date_to === today;
+                  })() ? 'active' : ''}`}
+                  onClick={() => {
+                    const today = new Date().toISOString().split('T')[0];
+                    setFilterStatus('all');
+                    setFilters({ ...filters, order_date_from: today, order_date_to: today, status: [] });
+                  }}
+                >
+                  📅 Šiandien
+                </button>
+                <button
+                  className={`quick-filter-btn ${(() => {
+                    const today = new Date();
+                    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+                    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+                    return filters.order_date_from === firstDay && filters.order_date_to === lastDay;
+                  })() ? 'active' : ''}`}
+                  onClick={() => {
+                    const today = new Date();
+                    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
+                    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+                    setFilterStatus('all');
+                    setFilters({ ...filters, order_date_from: firstDay, order_date_to: lastDay, status: [] });
+                  }}
+                >
+                  📆 Šis mėnuo
+                </button>
+                <button
+                  className={`quick-filter-btn ${filterStatus === 'new' ? 'active' : ''}`}
+                  onClick={() => {
+                    setFilterStatus('new');
+                    setFilters({ ...filters, status: ['new'], order_date_from: '', order_date_to: '' });
+                  }}
+                >
+                  🆕 Nauji
+                </button>
+                <button
+                  className={`quick-filter-btn ${filterStatus === 'executing' ? 'active' : ''}`}
+                  onClick={() => {
+                    setFilterStatus('executing');
+                    setFilters({ ...filters, status: ['executing'], order_date_from: '', order_date_to: '' });
+                  }}
+                >
+                  ⚙️ Vykdomi
+                </button>
+                <button
+                  className={`quick-filter-btn ${filterStatus === 'finished' ? 'active' : ''}`}
+                  onClick={() => {
+                    setFilterStatus('finished');
+                    setFilters({ ...filters, status: ['finished'], order_date_from: '', order_date_to: '' });
+                  }}
+                >
+                  ✅ Baigti
+                </button>
+                <button
+                  className={`quick-filter-btn ${filters.status.includes('waiting_for_docs') && filters.status.length === 1 ? 'active' : ''}`}
+                  onClick={() => {
+                    setFilterStatus('all');
+                    setFilters({ ...filters, status: ['waiting_for_docs'], order_date_from: '', order_date_to: '' });
+                  }}
+                >
+                  📄 Laukiama dokumentų
+                </button>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'nowrap', flex: '0 0 auto', whiteSpace: 'nowrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap' }}>
+                <span style={{ fontSize: '14px', color: '#666' }}>{ordersCountLabel}</span>
+              <input
+                type="number"
+                min="10"
+                max="1000"
+                step="10"
+                value={pageSize}
+                onChange={(e) => {
+                  const value = parseInt(e.target.value) || 100;
+                  const clampedValue = Math.min(Math.max(value, 10), 1000);
+                  setPageSize(clampedValue);
+                  localStorage.setItem('ordersPageSize', clampedValue.toString());
+                }}
+                style={{
+                    width: '72px',
+                  padding: '6px 8px',
+                  fontSize: '14px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  textAlign: 'center'
+                }}
+              />
+              </div>
+              <button
+                onClick={() => fetchOrders()}
+                disabled={loading}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '14px',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  backgroundColor: '#f8f9fa',
+                  color: '#333',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  opacity: loading ? 0.6 : 1
+                }}
+                title="Atnaujinti sąrašą"
+              >
+                🔄
+              </button>
+            {/* handleCreateOrder button - Naikinimui */}
+            {/*
+            <button className="button" onClick={handleCreateOrder}>
+                + Naujas
+            </button>
+            */}
+            <button className="button" onClick={handleCreateOrderNew} style={{ backgroundColor: '#28a745' }}>
+                + Naujas (TAB)
+            </button>
+          </div>
+          </div>
+          
+          {/* Advanced Filters Panel */}
+          {showFilters && (
+            <div className="filters-panel">
+              {/* Pagrindinė informacija */}
+              <div className="filters-section">
+                <h3 className="filters-section-title">📋 Pagrindinė informacija</h3>
+                <div className="filters-grid">
+                  <div className="filter-field">
+                    <label className="filter-label">🔵 Būsena</label>
+                    <select
+                      className="filter-select"
+                      value={filters.status.length > 0 ? filters.status[0] : ''}
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setFilters({ ...filters, status: [e.target.value] });
+                        } else {
+                          setFilters({ ...filters, status: [] });
+                        }
+                      }}
+                    >
+                      <option value="">-- Visos būsenos --</option>
+                      <option value="new">🆕 Naujas</option>
+                      <option value="assigned">👤 Priskirtas</option>
+                      <option value="executing">⚙️ Vykdomas</option>
+                      <option value="waiting_for_docs">📄 Laukiama Dokumentų</option>
+                      <option value="finished">✅ Baigtas</option>
+                      <option value="canceled">❌ Atšauktas</option>
+                    </select>
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">👥 Klientas</label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        className="filter-input"
+                        value={filterClientSearch}
+                        onChange={(e) => {
+                          setFilterClientSearch(e.target.value);
+                          setShowFilterClientDropdown(e.target.value.length > 0);
+                          if (!e.target.value) {
+                            setFilters({ ...filters, client_id: '' });
+                          }
+                        }}
+                        onFocus={() => {
+                          if (filterClientSearch) {
+                            searchFilterClients(filterClientSearch);
+                            setShowFilterClientDropdown(true);
+                          }
+                        }}
+                        onBlur={() => setTimeout(() => setShowFilterClientDropdown(false), 200)}
+                        placeholder="Ieškoti kliento..."
+                      />
+                      {showFilterClientDropdown && filterClients.length > 0 && (
+                        <div className="client-dropdown" style={{ zIndex: 3000 }}>
+                          {filterClients.map((client) => (
+                            <div
+                              key={client.id}
+                              className="client-dropdown-item"
+                              onClick={() => {
+                                setFilters({ ...filters, client_id: client.id.toString() });
+                                setFilterClientSearch(client.name);
+                                setShowFilterClientDropdown(false);
+                              }}
+                            >
+                              {client.name} {client.code ? `(${client.code})` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">🚚 Vežėjas</label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type="text"
+                        className="filter-input"
+                        value={filterCarrierSearch}
+                        onChange={(e) => {
+                          setFilterCarrierSearch(e.target.value);
+                          setShowFilterCarrierDropdown(e.target.value.length > 0);
+                          if (!e.target.value) {
+                            setFilters({ ...filters, carrier_id: '' });
+                          }
+                        }}
+                        onFocus={() => {
+                          if (filterCarrierSearch) {
+                            searchFilterCarriers(filterCarrierSearch);
+                            setShowFilterCarrierDropdown(true);
+                          }
+                        }}
+                        onBlur={() => setTimeout(() => setShowFilterCarrierDropdown(false), 200)}
+                        placeholder="Ieškoti vežėjo..."
+                      />
+                      {showFilterCarrierDropdown && filterCarriers.length > 0 && (
+                        <div className="client-dropdown" style={{ zIndex: 3000 }}>
+                          {filterCarriers.map((carrier) => (
+                            <div
+                              key={carrier.id}
+                              className="client-dropdown-item"
+                              onClick={() => {
+                                setFilters({ ...filters, carrier_id: carrier.id.toString() });
+                                setFilterCarrierSearch(carrier.name);
+                                setShowFilterCarrierDropdown(false);
+                              }}
+                            >
+                              {carrier.name} {carrier.code ? `(${carrier.code})` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📦 Užsakymo tipas</label>
+                    <AutocompleteInput
+                      fieldType="order_type"
+                      value={filters.order_type}
+                      onChange={(value) => setFilters({ ...filters, order_type: value })}
+                      placeholder="Įveskite ar pasirinkite užsakymo tipą..."
+                      className="filter-input"
+                      minLength={1}
+                    />
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">👨‍💼 Vadybininkas</label>
+                    <select
+                      className="filter-select"
+                      value={filters.manager_id}
+                      onChange={(e) => setFilters({ ...filters, manager_id: e.target.value })}
+                    >
+                      <option value="">-- Visi vadybininkai --</option>
+                      {allManagers.map(manager => (
+                        <option key={manager.id} value={manager.id}>{manager.username}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Maršrutai */}
+              <div className="filters-section">
+                <h3 className="filters-section-title">🗺️ Maršrutai</h3>
+                <div className="filters-grid">
+                  <div className="filter-field">
+                    <label className="filter-label">📍 Maršrutas iš</label>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      value={filters.route_from}
+                      onChange={(e) => setFilters({ ...filters, route_from: e.target.value })}
+                      placeholder="Įveskite miestą arba pasirinkite..."
+                      list="route-from-suggestions"
+                    />
+                    <datalist id="route-from-suggestions">
+                      {routeFromSuggestions.map((route, idx) => (
+                        <option key={idx} value={route} />
+                      ))}
+                    </datalist>
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📍 Maršrutas į</label>
+                    <input
+                      type="text"
+                      className="filter-input"
+                      value={filters.route_to}
+                      onChange={(e) => setFilters({ ...filters, route_to: e.target.value })}
+                      placeholder="Įveskite miestą arba pasirinkite..."
+                      list="route-to-suggestions"
+                    />
+                    <datalist id="route-to-suggestions">
+                      {routeToSuggestions.map((route, idx) => (
+                        <option key={idx} value={route} />
+                      ))}
+                    </datalist>
+                  </div>
+                </div>
+              </div>
+
+              {/* Datos */}
+              <div className="filters-section">
+                <h3 className="filters-section-title">📅 Datos</h3>
+                <div className="filters-grid">
+                  <div className="filter-field">
+                    <label className="filter-label">📅 Užsakymo data nuo</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filters.order_date_from}
+                      onChange={(e) => setFilters({ ...filters, order_date_from: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📅 Užsakymo data iki</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filters.order_date_to}
+                      onChange={(e) => setFilters({ ...filters, order_date_to: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📦 Pakrovimo data nuo</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filters.loading_date_from}
+                      onChange={(e) => setFilters({ ...filters, loading_date_from: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📦 Pakrovimo data iki</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filters.loading_date_to}
+                      onChange={(e) => setFilters({ ...filters, loading_date_to: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📤 Iškrovimo data nuo</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filters.unloading_date_from}
+                      onChange={(e) => setFilters({ ...filters, unloading_date_from: e.target.value })}
+                    />
+                  </div>
+
+                  <div className="filter-field">
+                    <label className="filter-label">📤 Iškrovimo data iki</label>
+                    <input
+                      type="date"
+                      className="filter-input"
+                      value={filters.unloading_date_to}
+                      onChange={(e) => setFilters({ ...filters, unloading_date_to: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+          
+        {/* Orders List */}
+        {loading ? (
+          <SkeletonTable rows={10} columns={12} />
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.date')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.number')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.email_received')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.client')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.docs_received')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.client_price')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.route')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.email_received')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.carrier')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.docs_received')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.carrier_price')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.profit')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('orders.table.actions')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.length === 0 ? (
+                  <tr>
+                    <td colSpan={13} style={{ textAlign: 'center', padding: '20px' }}>
+                      {t('orders.table.no_orders')}
+                    </td>
+                  </tr>
+                ) : (
+                  orders.map((order, index) => {
+                    // Patikrinti ar klientui išrašyta sąskaita
+                    const clientInvoiceIssued = (order.payment_status_info?.invoice_issued ?? order.client_invoice_issued) || !!order.first_sales_invoice;
+                    
+                    // Patikrinti ar vežėjui gauta sąskaita
+                    // 0 = negauta, 1 = daliai gauta, 2 = visiems gauta
+                    let carrierInvoiceStatus: 0 | 1 | 2 = 0;
+                    let hasCarrierOverdue = false;
+                    let maxCarrierOverdueDays = 0;
+                    if (order.carriers && Array.isArray(order.carriers) && order.carriers.length > 0) {
+                      const validCarriers = order.carriers.filter((c: any) => c && c.partner);
+                      if (validCarriers.length > 0) {
+                        const getInvoiceDocs = (carrier: any): ExpeditionDocument[] => {
+                          const documents = (carrier.documents || []) as ExpeditionDocument[];
+                          return documents.filter((doc) => doc.document_type === 'invoice');
+                        };
+                        // Tikrinti ar yra dokumentai ARBA invoice_received flag'as
+                        const receivedCount = validCarriers.filter((c: any) => {
+                          const hasDocs = getInvoiceDocs(c).length > 0;
+                          const hasInvoiceReceived = c.invoice_received === true;
+                          return hasDocs || hasInvoiceReceived;
+                        }).length;
+                        
+                        if (receivedCount === validCarriers.length) {
+                          // Visiems gauta
+                          carrierInvoiceStatus = 2;
+                        } else if (receivedCount > 0) {
+                          // Daliai gauta
+                          carrierInvoiceStatus = 1;
+                        } else {
+                          // Nei vienam negauta
+                          carrierInvoiceStatus = 0;
+                        }
+                        
+                        // Patikrinti ar yra vėluojančių vežėjų sąskaitų
+                        // Tikriname ir pagal payment_status_info, ir pagal due_date tiesiogiai
+                        validCarriers.forEach((c: any) => {
+                          let isOverdue = false;
+                          let overdueDays = 0;
+                          
+                          // Pirma tikrinti payment_status_info (backend apskaičiuotas)
+                          if (c.payment_status_info) {
+                            if (c.payment_status_info.status === 'overdue' || (c.payment_status_info.overdue_days && c.payment_status_info.overdue_days > 0)) {
+                              isOverdue = true;
+                              overdueDays = c.payment_status_info.overdue_days || 0;
+                            }
+                          }
+                          
+                          // Jei payment_status_info nerodo overdue, bet yra due_date, patikrinti tiesiogiai
+                          if (!isOverdue && c.due_date) {
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            const dueDate = new Date(c.due_date);
+                            dueDate.setHours(0, 0, 0, 0);
+                            
+                            if (dueDate < today) {
+                              isOverdue = true;
+                              overdueDays = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+                            }
+                          }
+                          
+                          if (isOverdue) {
+                            hasCarrierOverdue = true;
+                            if (overdueDays > maxCarrierOverdueDays) {
+                              maxCarrierOverdueDays = overdueDays;
+                            }
+                          }
+                        });
+                      }
+                    }
+                    
+                    // Kliento apmokėjimo statusas
+                    let clientPaymentStatus: 'no_invoice' | 'unpaid' | 'partially_paid' | 'paid' = 'no_invoice';
+                    if (clientInvoiceIssued) {
+                      const paymentStatus = order.payment_status_info?.status || order.client_payment_status || 'not_paid';
+                      if (paymentStatus === 'paid') {
+                        clientPaymentStatus = 'paid';
+                      } else if (paymentStatus === 'partially_paid') {
+                        clientPaymentStatus = 'partially_paid';
+                      } else {
+                        clientPaymentStatus = 'unpaid';
+                      }
+                    }
+                    
+                    // Vežėjo apmokėjimo statusas
+                    let carrierPaymentStatus: 'no_invoice' | 'unpaid' | 'partially_paid' | 'paid' = 'no_invoice';
+                    if (order.carriers && Array.isArray(order.carriers) && order.carriers.length > 0) {
+                      const validCarriers = order.carriers.filter((c: any) => c && c.partner);
+                      if (validCarriers.length > 0) {
+                        // Jei visiems gauta sąskaita (carrierInvoiceStatus === 2)
+                        if (carrierInvoiceStatus === 2) {
+                          // Patikrinti ar visi apmokėti
+                          const allPaid = validCarriers.every((c: any) => {
+                            const status = c.payment_status_info?.status || c.payment_status || 'not_paid';
+                            return status === 'paid';
+                          });
+                          const somePaid = validCarriers.some((c: any) => {
+                            const status = c.payment_status_info?.status || c.payment_status || 'not_paid';
+                            return status === 'paid' || status === 'partially_paid';
+                          });
+                          
+                          if (allPaid) {
+                            carrierPaymentStatus = 'paid';
+                          } else if (somePaid) {
+                            carrierPaymentStatus = 'partially_paid';
+                          } else {
+                            carrierPaymentStatus = 'unpaid';
+                          }
+                        } else if (carrierInvoiceStatus === 1) {
+                          // Daliai gauta - dalinai apmokėta arba neapmokėta
+                          const somePaid = validCarriers.some((c: any) => {
+                            const status = c.payment_status_info?.status || c.payment_status || 'not_paid';
+                            return status === 'paid' || status === 'partially_paid';
+                          });
+                          carrierPaymentStatus = somePaid ? 'partially_paid' : 'unpaid';
+                        } else {
+                          // Negauta - bet jei yra sąskaitos, bet neapmokėtos
+                          const hasInvoices = validCarriers.some((c: any) => {
+                            const hasDocs = (c.documents || []).some((doc: any) => doc.document_type === 'invoice');
+                            return hasDocs || c.invoice_received === true;
+                          });
+                          if (hasInvoices) {
+                            carrierPaymentStatus = 'unpaid';
+                          } else {
+                            carrierPaymentStatus = 'no_invoice';
+                          }
+                        }
+                      }
+                    }
+                    
+                    // Kliento kaina (be PVM)
+                    const clientPriceNet = order.client_price_net || order.calculated_client_price_net || 0;
+                    const clientPriceColor = getPaymentColor(clientPaymentStatus);
+                    
+                    // Vežėjo kaina (be PVM) - suma visų carriers kainų
+                    const carrierPriceNet = order.carriers && Array.isArray(order.carriers) 
+                      ? order.carriers.reduce((sum: number, c: any) => sum + (c.price_net ? parseFloat(String(c.price_net)) : 0), 0)
+                      : 0;
+                    const carrierPriceColor = getPaymentColor(carrierPaymentStatus);
+                    
+                    // Kitos išlaidos
+                    const otherCosts = order.other_costs && Array.isArray(order.other_costs)
+                      ? order.other_costs.reduce((sum: number, c: any) => {
+                          const amount = typeof c === 'object' && c !== null && 'amount' in c 
+                            ? (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0)
+                            : 0;
+                          return sum + amount;
+                        }, 0)
+                      : 0;
+                    
+                    // Pelnas: visada apskaičiuoti pagal formulę, kad būtų teisingas
+                    // client_price - carrier_costs - other_costs
+                    const profit = parseFloat(String(clientPriceNet)) - carrierPriceNet - otherCosts;
+                    
+                    // Maršrutas formatavimas (vertikaliai su rodykle žemyn)
+                    // PAPRASTA LOGIKA:
+                    // Iš kur: jei yra siuntėjas - rodyti siuntėją, jei nėra - rodyti adresą
+                    // Į kur: jei yra gavėjas - rodyti gavėją, jei nėra - rodyti adresą
+
+                    const hasSender = order.sender_route_from && typeof order.sender_route_from === 'string' && order.sender_route_from.trim().length > 0;
+                    const hasReceiver = order.receiver_route_to && typeof order.receiver_route_to === 'string' && order.receiver_route_to.trim().length > 0;
+
+                    // Iš kur informacija
+                    let routeFromText = '';
+                    if (hasSender) {
+                      routeFromText = order.sender_route_from || '';
+                    } else {
+                      // Jei nėra siuntėjo, rodyti šalį + pašto kodą + miestą + adresą
+                      const fromParts = [
+                        order.route_from_country,
+                        order.route_from_postal_code,
+                        order.route_from_city,
+                        order.route_from_address
+                      ].filter(part => part && typeof part === 'string' && part.trim().length > 0);
+                      routeFromText = fromParts.join(', ') || order.route_from || '';
+                    }
+
+                    // Į kur informacija
+                    let routeToText = '';
+                    if (hasReceiver) {
+                      routeToText = order.receiver_route_to || '';
+                    } else {
+                      // Jei nėra gavėjo, rodyti šalį + pašto kodą + miestą + adresą
+                      const toParts = [
+                        order.route_to_country,
+                        order.route_to_postal_code,
+                        order.route_to_city,
+                        order.route_to_address
+                      ].filter(part => part && typeof part === 'string' && part.trim().length > 0);
+                      routeToText = toParts.join(', ') || order.route_to || '';
+                    }
+
+                    const routeDisplay = (routeFromText.trim() || routeToText.trim()) ? (
+                      <RouteTooltip order={order}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', alignItems: 'center' }}>
+                          <div style={{ fontSize: '12px', textAlign: 'center' }}>{routeFromText || '-'}</div>
+                          <div style={{ textAlign: 'center', fontSize: '14px', lineHeight: '1' }}>↓</div>
+                          <div style={{ fontSize: '12px', textAlign: 'center' }}>{routeToText || '-'}</div>
+                        </div>
+                      </RouteTooltip>
+                    ) : '-';
+                    
+                    // Vežėjas
+                    let carrierDisplayNode: React.ReactNode = '-';
+                    if (order.carriers && Array.isArray(order.carriers) && order.carriers.length > 0) {
+                      const validCarriers = order.carriers.filter((c: any) => c && c.partner);
+                      if (validCarriers.length === 1) {
+                        const single = validCarriers[0];
+                        carrierDisplayNode = (
+                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                            <span>{single.partner.name}</span>
+                            {single.expedition_number && (
+                              <span
+                                style={{
+                                  display: 'inline-block',
+                                  marginTop: '4px',
+                                  padding: '2px 6px',
+                                  borderRadius: '999px',
+                                  backgroundColor: '#e0f2fe',
+                                  color: '#0369a1',
+                                  fontSize: '11px',
+                                  fontWeight: 600,
+                                }}
+                              >
+                                Eksp.: {single.expedition_number}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      } else if (validCarriers.length > 1) {
+                        carrierDisplayNode = (
+                          <CarrierTooltip carriers={validCarriers} />
+                        );
+                      }
+                    } else if (order.carrier && order.carrier.name) {
+                      carrierDisplayNode = order.carrier.name;
+                    }
+                    
+                    // Mėnesių spalvų paletė (12 skirtingų spalvų)
+                    const monthColors = [
+                      '#3498db', // Sausis - mėlyna
+                      '#e74c3c', // Vasaris - raudona
+                      '#2ecc71', // Kovas - žalia
+                      '#f39c12', // Balandis - oranžinė
+                      '#9b59b6', // Gegužė - violetinė
+                      '#1abc9c', // Birželis - turkiz
+                      '#e67e22', // Liepa - tamsi oranžinė
+                      '#34495e', // Rugpjūtis - pilka
+                      '#16a085', // Rugsėjis - tamsi turkiz
+                      '#c0392b', // Spalis - tamsi raudona
+                      '#8e44ad', // Lapkritis - tamsi violetinė
+                      '#2980b9'  // Gruodis - tamsi mėlyna
+                    ];
+                    
+                    // Nustatyti mėnesio spalvą pagal užsakymo datą
+                    const orderDate = order.order_date ? new Date(order.order_date) : new Date(order.created_at);
+                    const currentMonth = orderDate.getMonth(); // 0-11
+                    const monthColor = monthColors[currentMonth];
+
+                    // Gauti užsakymo statuso spalvą ir padaryti pasteliniu atspalviu
+                    const orderStatusColor = getOrderColor(order.status);
+                    // Konvertuoti hex į rgba su 8% opacity (lengvesnis pastelinis efektas)
+                    let pastelOrderColor = 'transparent';
+                    if (orderStatusColor.startsWith('#') && orderStatusColor.length === 7) {
+                      // Konvertuoti hex į rgb
+                      const r = parseInt(orderStatusColor.slice(1, 3), 16);
+                      const g = parseInt(orderStatusColor.slice(3, 5), 16);
+                      const b = parseInt(orderStatusColor.slice(5, 7), 16);
+                      // Sukurti rgba su 8% opacity
+                      pastelOrderColor = `rgba(${r}, ${g}, ${b}, 0.08)`;
+                    }
+
+                    return (
+                      <tr
+                        key={order.id}
+                        onClick={() => handleViewOrder(order)}
+                        style={{
+                          cursor: 'pointer',
+                          borderLeft: `8px solid ${monthColor}`,
+                          backgroundColor: pastelOrderColor
+                        }}
+                      >
+                        <td>{order.order_date ? new Date(order.order_date).toLocaleDateString('lt-LT') : '-'}</td>
+                        <td>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                            <span style={{ fontWeight: '500' }}>{order.order_number ? order.order_number : `#${order.id}`}</span>
+                            <span style={{
+                              fontSize: '11px',
+                              color: '#666',
+                              fontStyle: 'italic'
+                            }}>
+                              {ORDER_STATUSES.find((s: { value: string; label: string }) => s.value === order.status)?.label || order.status}
+                            </span>
+                          </div>
+                        </td>
+                        <td style={{ textAlign: 'center', width: '50px' }}>
+                          {order.order_number && mailMatchedOrders.has(order.order_number.trim().toUpperCase()) && (
+                            <button
+                              type="button"
+                              className="order-mail-indicator"
+                              title="Yra gautų laiškų su šiuo užsakymo numeriu"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (order.order_number) {
+                                  handleOpenMailModal(order.order_number);
+                                }
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '24px',
+                                padding: '0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                lineHeight: '1',
+                                margin: '0 auto'
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color: '#FFA500',
+                                  fontSize: '24px',
+                                  fontWeight: 'bold',
+                                  textShadow: '0 0 2px rgba(255, 165, 0, 0.8)',
+                                  filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3))'
+                                }}
+                              >
+                                ✉
+                              </span>
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                            <span>{order.client?.name || '-'}</span>
+                        </td>
+                        <td style={{ textAlign: 'center', width: '50px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexDirection: 'column' }}>
+                            <span style={{ 
+                              fontSize: '14px',
+                              color: clientInvoiceIssued ? '#28a745' : '#dc3545'
+                            }}>
+                              {clientInvoiceIssued ? '✓' : '✗'}
+                            </span>
+                            {clientInvoiceIssued && (order.payment_status_info?.status === 'overdue' || (order.payment_status_info?.overdue_days && order.payment_status_info.overdue_days > 0) || order.has_overdue_invoices) && (
+                              <span 
+                                style={{ 
+                                  fontSize: '14px',
+                                  color: '#ffc107',
+                                  cursor: 'help'
+                                }}
+                                title={`Sąskaita vėluojama apmokėti${order.payment_status_info?.overdue_days ? ` (${order.payment_status_info.overdue_days} d.)` : ''}`}
+                              >
+                                🕐
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
+                          <OrderClientPriceTooltip order={order}>
+                            <div style={{ color: clientPriceColor, fontWeight: '500' }}>
+                              {clientPriceNet ? parseFloat(String(clientPriceNet)).toFixed(2) : '0.00'} EUR
+                            </div>
+                          </OrderClientPriceTooltip>
+                        </td>
+                        <td style={{ fontSize: '12px' }}>{routeDisplay}</td>
+                        <td style={{ textAlign: 'center', width: '50px' }}>
+                          {order.order_number && mailMatchedOrders.has(order.order_number.trim().toUpperCase()) && (
+                            <button
+                              type="button"
+                              className="order-mail-indicator"
+                              title="Yra gautų laiškų su šiuo užsakymo numeriu"
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (order.order_number) {
+                                  handleOpenMailModal(order.order_number);
+                                }
+                              }}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontSize: '24px',
+                                padding: '0',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                lineHeight: '1',
+                                margin: '0 auto'
+                              }}
+                            >
+                              <span
+                                style={{
+                                  color: '#FFA500',
+                                  fontSize: '24px',
+                                  fontWeight: 'bold',
+                                  textShadow: '0 0 2px rgba(255, 165, 0, 0.8)',
+                                  filter: 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3))'
+                                }}
+                              >
+                                ✉
+                              </span>
+                            </button>
+                          )}
+                        </td>
+                        <td>
+                            <div>{carrierDisplayNode}</div>
+                        </td>
+                        <td style={{ textAlign: 'center', width: '50px' }}>
+                          {(() => {
+                            const validCarriers = order.carriers && Array.isArray(order.carriers) 
+                              ? order.carriers.filter((c: any) => c && c.partner)
+                              : [];
+                            const hasMultipleCarriers = validCarriers.length > 1;
+                            
+                            // Jei yra keli vežėjai ir daliai gauta sąskaita, rodyti tooltip'ą
+                            if (hasMultipleCarriers && carrierInvoiceStatus === 1) {
+                              return (
+                                <CarrierInvoiceStatusTooltip carriers={validCarriers}>
+                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexDirection: 'column' }}>
+                                    <span style={{ 
+                                      fontSize: '14px',
+                                      color: '#ffc107',
+                                      cursor: 'help'
+                                    }}>
+                                      ⚠
+                                    </span>
+                                    {hasCarrierOverdue && (
+                                      <span 
+                                        style={{ 
+                                          fontSize: '14px',
+                                          color: '#ffc107',
+                                          cursor: 'help'
+                                        }}
+                                        title={`Sąskaita vėluojama apmokėti${maxCarrierOverdueDays > 0 ? ` (${maxCarrierOverdueDays} d.)` : ''}`}
+                                      >
+                                        🕐
+                                      </span>
+                                    )}
+                                  </div>
+                                </CarrierInvoiceStatusTooltip>
+                              );
+                            }
+                            
+                            // Kitu atveju rodyti paprastą statusą
+                            return (
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '4px', flexDirection: 'column' }}>
+                                <span style={{ 
+                                  fontSize: '14px',
+                                  color: carrierInvoiceStatus === 2 ? '#28a745' : carrierInvoiceStatus === 1 ? '#ffc107' : '#dc3545'
+                                }}>
+                                  {carrierInvoiceStatus === 2 ? '✓' : carrierInvoiceStatus === 1 ? '⚠' : '✗'}
+                                </span>
+                                {hasCarrierOverdue && (
+                                  <span 
+                                    style={{ 
+                                      fontSize: '14px',
+                                      color: '#ffc107',
+                                      cursor: 'help'
+                                    }}
+                                    title={`Sąskaita vėluojama apmokėti${maxCarrierOverdueDays > 0 ? ` (${maxCarrierOverdueDays} d.)` : ''}`}
+                                  >
+                                    🕐
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </td>
+                        <td style={{ color: carrierPriceColor, fontWeight: '500' }}>
+                          <CarrierPriceTooltip order={order}>
+                          {carrierPriceNet > 0 ? carrierPriceNet.toFixed(2) : '0.00'} EUR
+                          </CarrierPriceTooltip>
+                        </td>
+                        <td style={{ fontWeight: '500', color: profit >= 0 ? '#28a745' : '#dc3545', whiteSpace: 'nowrap' }}>
+                          {profit.toFixed(2)} EUR
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()} style={{ width: '50px', minWidth: '50px' }}>
+                          <div style={{ 
+                            display: 'flex', 
+                            flexDirection: 'column',
+                            gap: '1px'
+                          }}>
+                            {/* Veiksmai: Redaguoti, Peržiūrėti, Trinti */}
+                            <div style={{ 
+                              display: 'flex', 
+                              gap: '4px',
+                              width: '100%',
+                              justifyContent: 'center'
+                            }}>
+                            {/* handleEditOrder button - Naikinimui */}
+                            {/*
+            <button
+                                className="button button-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditOrder(order);
+                                }}
+                                style={{ 
+                                  padding: '6px', 
+                                  fontSize: '18px', 
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: '400',
+                                  borderRadius: '0',
+                                  border: 'none',
+                                  backgroundColor: 'transparent',
+                                  color: '#333',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxSizing: 'border-box',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minWidth: '28px',
+                                  opacity: '0.6'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.opacity = '1';
+                                  e.currentTarget.style.transform = 'scale(1.15)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.opacity = '0.6';
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                }}
+                                title="Redaguoti (Senas)"
+                              >
+                                ✏
+                            </button>
+                            */}
+                            <button
+                                className="button button-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditOrderNew(order);
+                                }}
+                                style={{ 
+                                  padding: '6px', 
+                                  fontSize: '18px', 
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: '400',
+                                  borderRadius: '0',
+                                  border: 'none',
+                                  backgroundColor: 'transparent',
+                                  color: '#333',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxSizing: 'border-box',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minWidth: '28px',
+                                  opacity: '0.6'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.opacity = '1';
+                                  e.currentTarget.style.transform = 'scale(1.15)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.opacity = '0.6';
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                }}
+                                title="Redaguoti (TAB)"
+                              >
+                                📑
+            </button>
+            <button
+                                className="button button-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  fetchHtmlPreview(order.id, i18n.language);
+                                }}
+                                style={{ 
+                                  padding: '6px', 
+                                  fontSize: '18px', 
+                                  backgroundColor: 'transparent',
+                                  color: '#333',
+                                  border: 'none',
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: '400',
+                                  borderRadius: '0',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxSizing: 'border-box',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minWidth: '28px',
+                                  opacity: '0.6'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.opacity = '1';
+                                  e.currentTarget.style.transform = 'scale(1.15)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.opacity = '0.6';
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                }}
+                                title="Peržiūrėti sutartį"
+                              >
+                                👁️
+            </button>
+            <button
+                                className="button button-secondary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteOrder(order.id);
+                                }}
+                                style={{
+                                  padding: '6px',
+                                  fontSize: '18px',
+                                  backgroundColor: 'transparent',
+                                  color: '#333',
+                                  border: 'none',
+                                  whiteSpace: 'nowrap',
+                                  fontWeight: '400',
+                                  borderRadius: '0',
+                                  cursor: 'pointer',
+                                  transition: 'all 0.15s ease',
+                                  boxSizing: 'border-box',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  minWidth: '28px',
+                                  opacity: '0.6'
+                                }}
+                                onMouseEnter={(e) => {
+                                  e.currentTarget.style.opacity = '1';
+                                  e.currentTarget.style.transform = 'scale(1.15)';
+                                }}
+                                onMouseLeave={(e) => {
+                                  e.currentTarget.style.opacity = '0.6';
+                                  e.currentTarget.style.transform = 'scale(1)';
+                                }}
+                                title="Ištrinti užsakymą"
+                              >
+                                🗑️
+            </button>
+        </div>
+          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+            
+            {/* Puslapiavimas */}
+            {totalPages > 1 && (
+              <div style={{
+                display: 'flex',
+                justifyContent: 'center',
+                alignItems: 'center',
+                gap: '10px',
+                marginTop: '20px',
+                padding: '15px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '8px'
+              }}>
+                <button
+                  className="button"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    opacity: currentPage === 1 ? 0.5 : 1,
+                    cursor: currentPage === 1 ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  ← Ankstesnis
+                </button>
+                
+                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px', color: '#666', marginRight: '5px' }}>
+                    Puslapis:
+                  </span>
+                  {(() => {
+                    // Helper funkcija puslapių numeriams su "..."
+                    // Formatas: 1 ... 3 4 5 ... 7
+                    const getPageNumbers = (current: number, total: number): (number | string)[] => {
+                      if (total <= 5) {
+                        // Jei puslapių mažai, rodyti visus
+                        return Array.from({ length: total }, (_, i) => i + 1);
+                      }
+                      
+                      const pages: (number | string)[] = [];
+                      
+                      // Visada rodyti pirmą puslapį
+                      pages.push(1);
+                      
+                      if (current <= 3) {
+                        // Jei esame pradžioje: 1 2 3 4 ... total
+                        for (let i = 2; i <= 4; i++) {
+                          pages.push(i);
+                        }
+                        if (total > 5) {
+                          pages.push('...');
+                          pages.push(total);
+                        }
+                      } else if (current >= total - 2) {
+                        // Jei esame pabaigoje: 1 ... total-3 total-2 total-1 total
+                        if (total > 5) {
+                          pages.push('...');
+                        }
+                        for (let i = total - 3; i <= total; i++) {
+                          pages.push(i);
+                        }
+                      } else {
+                        // Viduryje: 1 ... current-1 current current+1 ... total
+                        pages.push('...');
+                        for (let i = current - 1; i <= current + 1; i++) {
+                          pages.push(i);
+                        }
+                        pages.push('...');
+                        pages.push(total);
+                      }
+                      
+                      return pages;
+                    };
+                    
+                    const pageNumbers = getPageNumbers(currentPage, totalPages);
+                    
+                    return pageNumbers.map((page, index) => {
+                      if (page === '...') {
+                        return (
+                          <span key={`ellipsis-${index}`} style={{ padding: '0 4px', fontSize: '14px', color: '#666' }}>
+                            ...
+                          </span>
+                        );
+                      }
+                      
+                      const pageNum = page as number;
+                      const isActive = pageNum === currentPage;
+                      
+                      return (
+                        <button
+                          key={pageNum}
+                          onClick={() => setCurrentPage(pageNum)}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '14px',
+                            border: '1px solid #dee2e6',
+                            borderRadius: '4px',
+                            backgroundColor: isActive ? '#007bff' : 'white',
+                            color: isActive ? 'white' : '#333',
+                            cursor: 'pointer',
+                            minWidth: '40px',
+                            fontWeight: isActive ? 'bold' : 'normal'
+                          }}
+                        >
+                          {pageNum}
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+                
+                <button
+                  className="button"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  style={{
+                    padding: '8px 16px',
+                    fontSize: '14px',
+                    opacity: currentPage === totalPages ? 0.5 : 1,
+                    cursor: currentPage === totalPages ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  Kitas →
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Order Edit Modal - Naikinimui */}
+        {/*
+        {showEditModal && (
+          <OrderEditModal
+            order={editingOrder as any}
+            isOpen={showEditModal}
+            onClose={() => {
+              setShowEditModal(false);
+              setEditingOrder(null);
+            }}
+            onSave={handleOrderSaved}
+            onOrderUpdate={(updatedOrder) => {
+              const normalized = normalizeOrderData(updatedOrder);
+              setEditingOrder(normalized);
+              setSelectedOrder(normalized);
+              setOrders((prevOrders) =>
+                prevOrders.map((order) => (order.id === normalized.id ? normalized : order))
+              );
+            }}
+            showToast={showToast}
+          />
+        )}
+        */}
+
+        {/* NEW Tabbed Order Edit Modal */}
+        {showNewEditModal && (
+          <OrderEditModal_NEW
+            order={editingOrder as any}
+            isOpen={showNewEditModal}
+            onClose={() => {
+              setShowNewEditModal(false);
+              setEditingOrder(null);
+            }}
+            onSave={handleOrderSaved}
+            onOrderUpdate={(updatedOrder) => {
+              const normalized = normalizeOrderData(updatedOrder);
+              setEditingOrder(normalized);
+              setSelectedOrder(normalized);
+              setOrders((prevOrders) =>
+                prevOrders.map((order) => (order.id === normalized.id ? normalized : order))
+              );
+            }}
+            showToast={showToast}
+          />
+        )}
+
+
+        {/* Order Details Modal - Naikinimui */}
+        {/*
+        <OrderDetailsModal
+          order={selectedOrder as any}
+          isOpen={showOrderDetails}
+          onClose={() => { setShowOrderDetails(false); setSelectedOrder(null); }}
+          onEdit={handleEditFromDetails}
+          onOrderUpdate={(updatedOrder) => {
+            const normalized = normalizeOrderData(updatedOrder);
+            setSelectedOrder(normalized);
+            setOrders(prevOrders => 
+              prevOrders.map(order => order.id === normalized.id ? normalized : order)
+            );
+          }}
+          showToast={showToast}
+          onShowRouteMap={(order) => {
+            const normalized = normalizeOrderData(order);
+            setSelectedOrder(normalized);
+            setShowRouteMap(true);
+          }}
+        />
+        */}
+
+        {/* Purchase Invoice Details Modal */}
+        {showPurchaseInvoiceDetails && selectedPurchaseInvoice && (
+          <div className="modal-overlay" onClick={() => setShowPurchaseInvoiceDetails(false)}>
+            <div className="modal-content modal-large" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-header">
+                <h2>Sąskaita #{selectedPurchaseInvoice.received_invoice_number}</h2>
+                <button className="modal-close" onClick={() => setShowPurchaseInvoiceDetails(false)}>×</button>
+              </div>
+              <div className="invoice-details">
+                <div className="details-section">
+                  <h3>Pagrindinė informacija</h3>
+                  <div className="details-grid">
+                    <div><strong>Tiekėjo sąskaitos numeris:</strong> {selectedPurchaseInvoice.received_invoice_number}</div>
+                    {selectedPurchaseInvoice.invoice_number && (
+                      <div><strong>Sistemos sąskaitos numeris:</strong> {selectedPurchaseInvoice.invoice_number}</div>
+                    )}
+                    <div>
+                      <strong>Mokėjimo statusas:</strong>
+                      <select
+                        value={selectedPurchaseInvoice.payment_status}
+                        onChange={async (e) => {
+                          try {
+                            const updateData: any = { payment_status: e.target.value };
+                            // Jei statusas keičiamas į 'paid', ir nėra payment_date, nustatyti šiandienos datą
+                            if (e.target.value === 'paid' && !selectedPurchaseInvoice.payment_date) {
+                              updateData.payment_date = new Date().toISOString().split('T')[0];
+                            }
+                            // Jei statusas keičiamas iš 'paid', išvalyti payment_date
+                            if (e.target.value !== 'paid' && selectedPurchaseInvoice.payment_status === 'paid') {
+                              updateData.payment_date = null;
+                            }
+                            await api.patch(`/invoices/purchase/${selectedPurchaseInvoice.id}/`, updateData);
+                            showToast('success', 'Mokėjimo statusas atnaujintas');
+                            // Atnaujinti sąskaitą
+                            const response = await api.get(`/invoices/purchase/${selectedPurchaseInvoice.id}/`);
+                            setSelectedPurchaseInvoice(response.data);
+                            // Atnaujinti užsakymo duomenis, kad būtų atnaujinta sąskaitų būsena
+                            if (selectedOrder) {
+                              const orderResponse = await api.get(`/orders/orders/${selectedOrder.id}/`);
+                              setSelectedOrder(normalizeOrderData(orderResponse.data));
+                            }
+                          } catch (error: any) {
+                            showToast('error', error.response?.data?.error || 'Klaida atnaujinant mokėjimo statusą');
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          marginLeft: '8px',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid #dee2e6',
+                          fontSize: '13px',
+                          cursor: 'pointer',
+                          backgroundColor: selectedPurchaseInvoice.payment_status === 'paid' ? '#d4edda' : 
+                            selectedPurchaseInvoice.payment_status === 'overdue' ? '#f8d7da' : 
+                            selectedPurchaseInvoice.payment_status === 'partially_paid' ? '#fff3cd' : '#fff',
+                          color: selectedPurchaseInvoice.payment_status === 'paid' ? '#155724' : 
+                            selectedPurchaseInvoice.payment_status === 'overdue' ? '#721c24' : 
+                            selectedPurchaseInvoice.payment_status === 'partially_paid' ? '#856404' : '#333'
+                        }}
+                      >
+                        <option value="unpaid">Neapmokėta</option>
+                        <option value="paid">Apmokėta</option>
+                        <option value="overdue">Vėluoja</option>
+                        <option value="partially_paid">Dalinis apmokėjimas</option>
+                      </select>
+                    </div>
+                    <div><strong>Tiekėjas:</strong> {selectedPurchaseInvoice.partner.name}</div>
+                    {selectedPurchaseInvoice.related_order && (
+                      <div><strong>Susijęs užsakymas:</strong> {selectedPurchaseInvoice.related_order.order_number || `#${selectedPurchaseInvoice.related_order.id}`}</div>
+                    )}
+                    {selectedPurchaseInvoice.expense_category && (
+                      <div><strong>Išlaidų kategorija:</strong> {selectedPurchaseInvoice.expense_category.name}</div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="details-section">
+                  <h3>Finansinė informacija</h3>
+                  <div className="details-grid">
+                    {(() => {
+                      const amountNet = parseFloat(selectedPurchaseInvoice.amount_net || '0');
+                      const vatRate = parseFloat(selectedPurchaseInvoice.vat_rate || '0');
+                      const vatAmount = amountNet * vatRate / 100;
+                      const amountTotal = amountNet + vatAmount;
+                      return (
+                        <>
+                          <div><strong>Suma be PVM:</strong> {amountNet.toFixed(2)} €</div>
+                          <div><strong>PVM ({vatRate}%):</strong> {vatAmount.toFixed(2)} €</div>
+                          <div><strong>Suma su PVM:</strong> {amountTotal.toFixed(2)} €</div>
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+                
+                <div className="details-section">
+                  <h3>Datų informacija</h3>
+                  <div className="details-grid">
+                    <div><strong>Tiekėjo sąskaitos išrašymo data:</strong> {selectedPurchaseInvoice.issue_date}</div>
+                    <div><strong>Gavimo data:</strong> {selectedPurchaseInvoice.received_date || '-'}</div>
+                    <div><strong>Mokėjimo terminas:</strong> {selectedPurchaseInvoice.due_date}</div>
+                    <div>
+                      <strong>Apmokėjimo data:</strong>
+                      <input
+                        type="date"
+                        value={selectedPurchaseInvoice.payment_date || ''}
+                        onChange={async (e) => {
+                          try {
+                            await api.patch(`/invoices/purchase/${selectedPurchaseInvoice.id}/`, {
+                              payment_date: e.target.value || null,
+                              // Jei nustatoma payment_date, automatiškai nustatyti payment_status į 'paid'
+                              ...(e.target.value && selectedPurchaseInvoice.payment_status !== 'paid' ? { payment_status: 'paid' } : {})
+                            });
+                            showToast('success', 'Apmokėjimo data atnaujinta');
+                            // Atnaujinti sąskaitą
+                            const response = await api.get(`/invoices/purchase/${selectedPurchaseInvoice.id}/`);
+                            setSelectedPurchaseInvoice(response.data);
+                            // Atnaujinti užsakymo duomenis
+                            if (selectedOrder) {
+                              const orderResponse = await api.get(`/orders/orders/${selectedOrder.id}/`);
+                              setSelectedOrder(normalizeOrderData(orderResponse.data));
+                            }
+                          } catch (error: any) {
+                            showToast('error', error.response?.data?.error || 'Klaida atnaujinant mokėjimo datą');
+                          }
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          marginLeft: '8px',
+                          padding: '4px 8px',
+                          borderRadius: '4px',
+                          border: '1px solid #dee2e6',
+                          fontSize: '13px',
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
+                    {selectedPurchaseInvoice.overdue_days > 0 && (
+                      <div><strong>Vėlavimo dienos:</strong> <span className="overdue-badge">{selectedPurchaseInvoice.overdue_days} dienos</span></div>
+                    )}
+                  </div>
+                </div>
+                
+                {(selectedPurchaseInvoice.invoice_file_url || selectedPurchaseInvoice.invoice_file) && (
+                  <div className="details-section">
+                    <h3>Sąskaitos failas</h3>
+                    <div>
+                      <a 
+                        href={selectedPurchaseInvoice.invoice_file_url || `${process.env.REACT_APP_API_URL?.replace('/api', '') || 'http://192.168.9.11:8000'}/${selectedPurchaseInvoice.invoice_file}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="btn btn-secondary"
+                      >
+                        📄 Peržiūrėti PDF
+                      </a>
+                    </div>
+                  </div>
+                )}
+                
+                {selectedPurchaseInvoice.notes && (
+                  <div className="details-section">
+                    <h3>Pastabos</h3>
+                    <p>{selectedPurchaseInvoice.notes}</p>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-secondary" onClick={() => setShowPurchaseInvoiceDetails(false)}>
+                  Užverti
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Route Map Modal */}
+        {mapRouteData && (
+          <div className="modal-overlay" onClick={() => setShowRouteMap(false)}>
+            <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '90vh', width: '1200px', height: '800px', display: 'flex', flexDirection: 'column' }}>
+              <div className="modal-header" style={{ padding: '12px 20px', borderBottom: '1px solid #dee2e6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', fontWeight: '600' }}>
+                  Maršrutas: {mapRouteData.fromDisplay} → {mapRouteData.toDisplay}
+                </h2>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <a
+                    href={`https://www.google.com/maps/dir/${encodeURIComponent(mapRouteData.from)}/${encodeURIComponent(mapRouteData.to)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '6px 12px',
+                      fontSize: '12px',
+                      backgroundColor: '#28a745',
+                      color: 'white',
+                      textDecoration: 'none',
+                      borderRadius: '4px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    🔗 Atidaryti Google Maps
+                  </a>
+                  <button
+                    className="button button-secondary"
+                    onClick={() => setShowRouteMap(false)}
+                    style={{ padding: '6px 12px', fontSize: '13px' }}
+                  >
+                    ✕ Uždaryti
+                  </button>
+                </div>
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden', position: 'relative', backgroundColor: '#f5f5f5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <iframe
+                  title={`Maršrutas nuo ${mapRouteData.fromDisplay} iki ${mapRouteData.toDisplay}`}
+                  width="100%"
+                  height="100%"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  allowFullScreen
+                  referrerPolicy="no-referrer-when-downgrade"
+                  src={`https://www.google.com/maps/embed/v1/directions?key=${process.env.REACT_APP_GOOGLE_MAPS_API_KEY || ''}&origin=${encodeURIComponent(mapRouteData.from)}&destination=${encodeURIComponent(mapRouteData.to)}&zoom=7`}
+                  onError={() => {
+                    // Jei embed neveikia (be API key), rodyti alternatyvų variantą
+                  }}
+                />
+                {!process.env.REACT_APP_GOOGLE_MAPS_API_KEY && (
+                  <div style={{ 
+                    position: 'absolute', 
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    flexDirection: 'column',
+                    gap: '12px',
+                    padding: '20px',
+                    textAlign: 'center'
+                  }}>
+                    <div style={{ fontSize: '16px', fontWeight: '600', marginBottom: '8px' }}>
+                      Google Maps žemėlapis nėra pasiekiamas
+                    </div>
+                    <a
+                      href={`https://www.google.com/maps/dir/${encodeURIComponent(mapRouteData.from)}/${encodeURIComponent(mapRouteData.to)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{
+                        padding: '10px 20px',
+                        fontSize: '14px',
+                        backgroundColor: '#28a745',
+                        color: 'white',
+                        textDecoration: 'none',
+                        borderRadius: '4px',
+                        display: 'inline-block'
+                      }}
+                    >
+                      Atidaryti Google Maps naujame lange
+                    </a>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Mail Modal */}
+        {mailModalOpen && (
+          <div className="mail-modal-overlay" onClick={handleCloseMailModal}>
+            <div className="mail-modal" onClick={(event) => event.stopPropagation()}>
+              <div className="mail-modal-header">
+                <h2>📨 Laiškai užsakymui {mailModalOrderNumber}</h2>
+                <button type="button" onClick={handleCloseMailModal} className="mail-modal-close">×</button>
+              </div>
+              <div className="mail-modal-body">
+                {mailModalLoading && <div className="mail-modal-loading">Kraunama...</div>}
+                {mailModalError && <div className="mail-modal-error">{mailModalError}</div>}
+                {!mailModalLoading && !mailModalError && mailModalMessages.length === 0 && (
+                  <div className="mail-modal-empty">Laiškų nerasta.</div>
+                )}
+                {!mailModalLoading && !mailModalError && mailModalMessages.length > 0 && (
+                  <div className="mail-modal-message-list">
+                    {mailModalMessages.map((message) => (
+                      <div key={message.id} className="mail-modal-message">
+                        <div className="mail-modal-message-header">
+                          <div className="mail-modal-subject">{message.subject || '(be temos)'}</div>
+                          <div className="mail-modal-meta">
+                            <span>{message.sender_display || message.sender || 'Nežinomas siuntėjas'}</span>
+                            <span>·</span>
+                            <span>{formatDateTime(message.date)}</span>
+                          </div>
+                        </div>
+                        {message.body_html ? (
+                          <div
+                            className="mail-modal-body-html"
+                            dangerouslySetInnerHTML={{ __html: message.body_html }}
+                          />
+                        ) : (
+                          <div className="mail-modal-snippet">
+                            {message.body_plain || message.snippet || '…'}
+                          </div>
+                        )}
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="mail-modal-attachments">
+                            <strong>Priedai:</strong>
+                            <ul>
+                              {message.attachments.map((attachment) => (
+                                <li key={attachment.id}>
+                                  <button
+                                    type="button"
+                                    className="mail-attachment-button"
+                                    onClick={() => {
+                                      const url = attachment.download_url || attachment.file || undefined;
+                                      if (!url) {
+                                        return;
+                                      }
+                                      setAttachmentPreview({
+                                        filename: attachment.filename,
+                                        url,
+                                        mailMessageId: message.id,
+                                      });
+                                    }}
+                                    disabled={!attachment.file && !attachment.download_url}
+                                  >
+                                    {attachment.filename}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Attachment Preview Modal */}
+        <AttachmentPreviewModal
+          attachment={attachmentPreview}
+          onClose={() => setAttachmentPreview(null)}
+          mailMessageId={attachmentPreview?.mailMessageId}
+          relatedOrderNumber={mailModalOrderNumber}
+          onInvoiceCreated={() => {
+            // Rodyti sėkmės pranešimą
+            showToast('success', 'Sąskaita sėkmingai sukurta!');
+          }}
+          onAssignSuccess={(updatedMessage) => {
+            // Po priskyrimo uždaryti modalą ir atnaujinti duomenis
+            setAttachmentPreview(null);
+            // Galima pridėti toast žinutę apie sėkmę
+            showToast('success', 'Laiškas sėkmingai priskirtas!');
+            // Duomenys bus automatiškai atnaujinti per fetchMailMatchSummary
+          }}
+        />
+        
+        {/* HTML Preview Modal */}
+      <HTMLPreviewModal
+        preview={htmlPreview}
+        onClose={() => {
+          setHtmlPreview(null);
+          setHtmlPreviewOrderId(null);
+        }}
+        onLanguageChange={async (lang) => {
+          if (htmlPreviewOrderId) {
+            await fetchHtmlPreview(htmlPreviewOrderId, lang);
+          }
+        }}
+        currentLang={htmlPreviewLang}
+        onDownloadPDF={htmlPreview && htmlPreviewOrderId ? async () => {
+          try {
+            const response = await api.get(`/orders/orders/${htmlPreviewOrderId}/pdf/`, {
+              params: { lang: htmlPreviewLang },
+              responseType: 'blob',
+            });
+
+              const blob = new Blob([response.data], { type: 'application/pdf' });
+              const blobUrl = URL.createObjectURL(blob);
+              const link = document.createElement('a');
+              link.href = blobUrl;
+              link.download = `uzsakymas-${htmlPreviewOrderId}.pdf`;
+              document.body.appendChild(link);
+              link.click();
+              document.body.removeChild(link);
+              URL.revokeObjectURL(blobUrl);
+              showToast('success', 'PDF sėkmingai atsisiųstas');
+            } catch (error: any) {
+              showToast('error', 'Nepavyko atsisiųsti PDF');
+            }
+          } : undefined}
+          onSendEmail={htmlPreview && htmlPreviewOrderId ? async () => {
+            // Atidaryti email modalą - naudoti tą patį, kaip HTML template'e
+            const iframe = document.querySelector('.html-preview-iframe') as HTMLIFrameElement;
+            if (iframe && iframe.contentWindow) {
+              try {
+                // Iškviesti sendEmail funkciją iš iframe
+                (iframe.contentWindow as any).sendEmail?.();
+              } catch (e) {
+                showToast('error', 'Nepavyko atidaryti email modalo');
+              }
+            }
+          } : undefined}
+        />
+      </div>
+    </div>
+  );
+};
+
+export default OrdersPage;

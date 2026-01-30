@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <title>{{ invoice.invoice_number }} Sąsk. spausdinimas</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 0;
+        }
+        
+        html, body {
+            background-color: #FAFAFA;
+            margin: 0;
+            padding: 0;
+            font-family: verdana, arial, helvetica, sans-serif;
+        }
+        .page {
+            width: 210mm;
+            min-height: 297mm;
+            background: #fff;
+            position: relative;
+            padding: 10mm;
+            margin: 0 auto;
+        }
+        
+        .subpage {
+            padding-left: 10mm;
+            padding-right: 5mm;
+            padding-top: 10mm;
+            padding-bottom: 3mm;
+            background-color: #FFF;
+            width: 100%;
+            min-height: 277mm;
+        }
+    
+        .infot_footer_onscreen {
+            position: absolute;
+            width: 195mm;
+            bottom: 3mm;
+            text-align:initial;
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        .subpage div{
+            text-align:left;
+        }
+        
+        @media print {
+            @page {
+                size: A4;
+                margin: 0;
+            }
+            html, body {
+                background-color: #FFFFFF;
+                width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+            .page {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 0;
+                padding: 10mm;
+                border: none;
+                box-shadow: none;
+            }
+            .subpage {
+                padding-left: 10mm;
+                padding-right: 5mm;
+                padding-top: 10mm;
+                padding-bottom: 3mm;
+                margin: 0;
+                border: 0;
+                width: 100%;
+                min-height: auto;
+            }
+            .infot_footer_onscreen {
+                position: fixed;
+                bottom: 3mm;
+            }
+            .action-buttons {
+                display: none !important;
+            }
+            .toast-container {
+                display: none !important;
+            }
+        }
+        
+        /* Action buttons - visible only on screen, hidden when printing */
+        .action-buttons {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            display: flex;
+            gap: 8px;
+        }
+        
+        .action-button {
+            padding: 8px 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+        
+        .action-button:hover {
+            background-color: #0056b3;
+        }
+        
+        .action-button.email {
+            background-color: #28a745;
+        }
+        
+        .action-button.email:hover {
+            background-color: #218838;
+        }
+        
+        /* Toast notification */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: none;
+        }
+        
+        .toast {
+            min-width: 300px;
+            max-width: 500px;
+            padding: 16px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            margin-bottom: 12px;
+            animation: slideIn 0.3s ease-out;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .toast.success {
+            background-color: #d4edda;
+            border-left: 4px solid #28a745;
+            color: #155724;
+        }
+        
+        .toast.error {
+            background-color: #f8d7da;
+            border-left: 4px solid #dc3545;
+            color: #721c24;
+        }
+        
+        .toast.info {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            color: #0c5460;
+        }
+        
+        .toast-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+        
+        .toast-message {
+            flex: 1;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        
+        .toast-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: inherit;
+            opacity: 0.6;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .toast-close:hover {
+            opacity: 1;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        table.sask_lentele tr {
+            page-break-after: auto !important;
+            page-break-inside: avoid !important;
+        }
+        
+        .tmp_table_eil {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+        
+        .tmp_body {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 12px;
+            color: #000000;
+        }
+
+        .forma {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+
+        .tmp_table_head {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 10px;
+            color: #000000;
+        }
+
+        .tmp_table_head_sask_nr {
+            font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 15px;
+            color: #000000;
+        }
+        
+        .forma td{
+            text-wrap:normal;
+            word-wrap:break-word;
+            max-width:90mm;
+        }
+
+        /* Pagrindinis dokumento konteineris */
+        .dokumentas {
+            width: 100%;
+            max-width: 900px;
+            margin: 20px auto;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+
+        /* Sąskaitos antraštės stilizacija */
+        .saskaitos-antraste {
+            margin-bottom: 5px;
+            overflow: hidden;
+            font-size: 13px;
+        }
+        .saskaitos-antraste strong {
+            font-size: 14px;
+        }
+        .saskaitos-antraste span {
+            float: left;
+        }
+        .saskaitos-antraste .data {
+            float: right;
+        }
+
+        /* Sąskaitos lentelės stilizacija */
+        .saskaita-faktura {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .saskaita-faktura th,
+        .saskaita-faktura td {
+            border: 1px solid black;
+            padding: 8px 5px;
+            vertical-align: top;
+            line-height: 1.3;
+        }
+
+        .saskaita-faktura th {
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .saskaita-faktura .center {
+            text-align: center;
+        }
+
+        .saskaita-faktura .right {
+            text-align: right;
+        }
+
+        .saskaita-faktura td:nth-child(2) {
+            text-align: left;
+            line-height: 1.5;
+            width: 40%;
+        }
+
+        .saskaita-faktura tbody td {
+            height: 140px;
+        }
+
+        .saskaita-faktura tfoot {
+            display: none;
+        }
+
+        /* Sumų langelių stilizacija */
+        .summary-cell {
+            padding: 0;
+        }
+
+        .summary-content {
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            height: 100%;
+            width: 100%;
+        }
+
+        .summary-content .label {
+            padding: 4px 6px 4px 6px;
+            text-align: left;
+            font-size: 11px;
+            border-bottom: 1px solid black;
+            border-right: 1px solid black;
+            margin-right: -1px;
+        }
+
+        .summary-content .value {
+            padding: 4px 6px 4px 6px;
+            text-align: right;
+            font-size: 11px;
+            border-bottom: 1px solid black;
+            margin-left: -1px;
+        }
+
+        .summary-content .total-row {
+            font-weight: bold;
+            background-color: #f0f0f0;
+        }
+
+        .summary-content .value:last-child,
+        .summary-content .label:last-child {
+            border-bottom: none;
+        }
+
+        /* Papildomos sumos ir suma žodžiais */
+        .papildomos-sumos, .suma-zodziais {
+            font-size: 14px;
+            margin-top: 15px;
+            line-height: 1.5;
+        }
+        .suma-zodziais {
+            font-style: italic;
+        }
+    </style>
+</head>
+<body>
+    <!-- Toast notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+<center>
+    <div class="page">
+        <div class="subpage">
+            <div id="saskaita">
+                {% if logo_url %}
+                <table align="center" border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="forma" height="0" align="center" style="padding-bottom: 10px;">
+                                <img src="{{ logo_url }}" alt="{{ company.name }}" style="max-height: 50px; max-width: 200px; display: block; margin: 0 auto;">
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% else %}
+                <table align="center" border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="forma" height="0" align="center">
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                {% endif %}
+                
+                <br>
+                
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="tmp_body" height="0" align="left" style="width:50%" valign="top" nowrap="">
+                                <div style="float:left;"></div>
+                                Pardavėjas:<br>
+                                <b>{{ company.name }}</b><br>
+                                {% if company.code %}Įm.kodas: <b>{{ company.code }}</b><br>{% endif %}
+                                {% if company.vat_code %}PVM kodas: <b>{{ company.vat_code }}</b><br>{% endif %}
+                                Adresas: <br>
+                                <b>{{ company.address }}</b><br>
+                                {% if company.postal_code %}<b>{{ company.postal_code }}</b>{% endif %} 
+                                {% if company.city %}<b>{{ company.city }}</b>{% endif %}<br>
+                                {% if company.country %}<b>{{ company.country }}</b>{% endif %}<br>
+                                {% if company.phone %}<br>Telefonas: <b>{{ company.phone }}</b><br>{% endif %}
+                                {% if company.email %}<br>El. paštas: <b>{{ company.email }}</b><br>{% endif %}
+                            </td>
+                            <td class="tmp_body" height="0" align="left" valign="top" nowrap="">
+                                Pirkėjas:<br>
+                                <b>{{ invoice.partner.name }}</b><br>
+                                {% if invoice.partner.code %}Įm.kodas: <b>{{ invoice.partner.code }}</b><br>{% endif %}
+                                {% if invoice.partner.vat_code %}PVM kodas: <b>{{ invoice.partner.vat_code }}</b><br>{% endif %}
+                                Adresas: <br>
+                                {% if invoice.partner.address %}<b>{{ invoice.partner.address }}</b><br>{% endif %}
+                                {% if invoice.partner.city %}<b>{{ invoice.partner.city }}</b><br>{% endif %}
+                                {% if invoice.partner.country %}<b>{{ invoice.partner.country }}</b>{% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="tmp_body" height="0" align="left" valign="top" colspan="2">
+                                {% if company.bank_name %}
+                                <br><b>Bankas: </b>{{ company.bank_name }}
+                                {% endif %}
+                                {% if company.bank_code %}
+                                <br>Banko kodas: {{ company.bank_code }}
+                                {% endif %}
+                                {% comment %}SWIFT kodas gali būti pridėtas per settings vėliau{% endcomment %}
+                                {% if company.bank_account %}
+                                <br>Atsiskait. sąskaita: {{ company.bank_account }}
+                                {% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- Pagrindinis dokumento konteineris -->
+                <div class="dokumentas">
+                    <!-- Sąskaitos antraštė -->
+                    <div class="saskaitos-antraste">
+                        <span>PVM sąskaita-faktūra Nr.</span> <strong>{{ invoice.invoice_number }}</strong>
+                        <span class="data">Data: {{ invoice.issue_date|date:"Y.m.d" }}</span>
+                    </div>
+
+                <!-- TIKRA HTML LENTELĖ SU TFOOT kaip pavyzdyje -->
+                <table class="saskaita-faktura" style="width: 100%; border-collapse: collapse;">
+                    <thead>
+                        <tr>
+                            <th>Nr.</th>
+                            <th>Prekės - paslaugos pavadinimas</th>
+                            <th>Mat. vnt.</th>
+                            <th>Kiekis</th>
+                            <th>Kaina, EUR</th>
+                            <th>PVM (%)</th>
+                            <th>PVM EUR</th>
+                            <th>Suma su PVM EUR</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in invoice_items %}
+                        {% if forloop.last %}
+                        <!-- Paskutinė eilutė su sumomis -->
+                        <tr>
+                            <td class="center">{{ forloop.counter }}</td>
+                            <td style="text-align: left; word-wrap: break-word; word-break: break-word;">{{ item.description|safe }}</td>
+                            <td class="center">vnt.</td>
+                            <td class="center">1</td>
+                            <td class="right">{{ item.amount_net|floatformat:2 }}</td>
+                            <td class="center">{{ invoice.vat_rate|floatformat:0 }}</td>
+
+                            <!-- PVM EUR stulpelis -->
+                            <td colspan="1" class="summary-cell">
+                                <div class="summary-content">
+                                    <p class="label" style="border-top: 1px solid black;">Iš viso suma be PVM, EUR</p>
+                                    <p class="label">Iš viso PVM suma, EUR</p>
+                                    <p class="label total-row">IŠ VISO MOKĖTI, EUR</p>
+                                </div>
+                            </td>
+
+                            <!-- Suma su PVM EUR stulpelis -->
+                            <td colspan="1" class="summary-cell">
+                                <div class="summary-content">
+                                    <p class="value" style="border-top: 1px solid black;">{{ invoice.amount_net|floatformat:2 }}</p>
+                                    <p class="value">{{ vat_amount|floatformat:2 }}</p>
+                                    <p class="value total-row">{{ invoice.amount_total|floatformat:2 }}</p>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <!-- Įprastos eilutės -->
+                        <tr>
+                            <td class="center">{{ forloop.counter }}</td>
+                            <td style="text-align: left; word-wrap: break-word; word-break: break-word;">{{ item.description|safe }}</td>
+                            <td class="center">vnt.</td>
+                            <td class="center">1</td>
+                            <td class="right">{{ item.amount_net|floatformat:2 }}</td>
+                            <td class="center">{{ invoice.vat_rate|floatformat:0 }}</td>
+                            <td class="right">{{ item.vat_amount|floatformat:2 }}</td>
+                            <td class="right">{{ item.amount_total|floatformat:2 }}</td>
+                        </tr>
+                        {% endif %}
+                        {% endfor %}
+                    </tbody>
+                </table>
+                    <!-- Sumos eilutės kaip tfoot pavyzdyje -->
+                    <div style="display: table-row; height: 25px;">
+                        <div style="display: table-cell; border-left: none; border-bottom: none; border-top: none; padding: 0; background-color: transparent;" colspan="6"></div>
+                        <div class="forma summary-label">Iš viso suma be PVM, EUR</div>
+                        <div class="forma summary-value">{{ invoice.amount_net|floatformat:2 }}</div>
+                    </div>
+                    <div style="display: table-row;">
+                        <div style="display: table-cell; border-left: none; border-bottom: none; border-top: none; padding: 0; background-color: transparent;" colspan="6"></div>
+                        <div class="forma summary-label">Iš viso PVM suma, EUR</div>
+                        <div class="forma summary-value">{{ vat_amount|floatformat:2 }}</div>
+                    </div>
+                    <div class="total-row" style="display: table-row;">
+                        <div style="display: table-cell; border-left: none; border-bottom: none; border-top: none; padding: 0; background-color: transparent;" colspan="6"></div>
+                        <div class="forma summary-label">IŠ VISO MOKĖTI, EUR</div>
+                        <div class="forma summary-value" style="font-size: 14px;">{{ invoice.amount_total|floatformat:2 }}</div>
+                    </div>
+                </div>
+                
+                <!-- Papildomos sumos -->
+                <div class="papildomos-sumos">
+                    Iš viso suma be PVM, EUR {{ invoice.amount_net|floatformat:2 }}<br>
+                    Iš viso PVM suma, EUR {{ vat_amount|floatformat:2 }}<br>
+                    IŠ VISO MOKĖTI, EUR {{ invoice.amount_total|floatformat:2 }}
+                </div>
+
+                <p class="suma-zodziais">
+                    Suma žodžiais: {{ amount_in_words }}
+                </p>
+
+                {% if invoice.vat_rate_article %}
+                <div class="papildomos-sumos">
+                    * <em>{{ invoice.vat_rate_article }}</em>
+                </div>
+                {% endif %}
+
+                <table align="center" border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="tmp_table_eil" height="0" align="left">
+                                <br><br><b>Apmokėti iki: </b><b>{{ invoice.due_date|date:"Y-m-d" }}<br><br></b>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <table border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tbody>
+                        <tr>
+                            <td class="tmp_table_eil" height="0" align="left" valign="top">
+                                {% if invoice_issuer %}Sąskaitą išrašė: {{ invoice_issuer }}{% endif %}
+                            </td>
+                        </tr>
+                    </tbody>
+                    </table>
+                </div> <!-- Uždaromas dokumentas konteineris -->
+            </div>
+        </div>
+    </div>
+</center>
+    <script>
+        function downloadPDF() {
+            {% if invoice.id %}
+                const invoiceId = {{ invoice.id }};
+                let baseUrl = window.location.origin;
+                
+                // Jei esame frontend porte (3000), pakeisti į backend portą (8000)
+                if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                    baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                }
+                
+                const pdfUrl = `${baseUrl}/api/invoices/sales/${invoiceId}/pdf/`;
+                
+                // Naudoti fetch, kad gautume PDF kaip blob ir atsisiųstume
+                fetch(pdfUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
+                    },
+                    credentials: 'include'
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('HTTP error! status: ' + response.status);
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    // Patikrinti, ar tikrai PDF (pirmi 4 bytes turi būti %PDF)
+                    blob.arrayBuffer().then(buffer => {
+                        const uint8Array = new Uint8Array(buffer);
+                        if (uint8Array[0] === 0x25 && uint8Array[1] === 0x50 && uint8Array[2] === 0x44 && uint8Array[3] === 0x46) {
+                            // Tai PDF, atsisiųsti
+                            downloadBlob(blob, 'saskaita_{{ invoice.invoice_number|default:invoice.id }}.pdf');
+                        } else {
+                            // Ne PDF - gauti tekstą ir parodyti klaidą
+                            blob.text().then(text => {
+                                console.error('Gautas ne PDF:', text.substring(0, 200));
+                                showToast('Klaida: gautas failas nėra PDF formatas. Patikrinkite backend log\'us.', 'error');
+                            });
+                        }
+                    });
+                })
+                .catch(error => {
+                    console.error('Klaida atsisiunčiant PDF:', error);
+                    showToast('Klaida atsisiunčiant PDF: ' + error.message, 'error');
+                });
+            {% endif %}
+        }
+        
+        function downloadBlob(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
+        }
+        
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            if (!container) return null;
+            
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const icons = {
+                success: '✅',
+                error: '❌',
+                info: 'ℹ️'
+            };
+            
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.info}</span>
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" onclick="this.parentElement.remove(); checkToastContainer();">×</button>
+            `;
+            
+            container.style.display = 'block';
+            container.appendChild(toast);
+            
+            const timeout = (type === 'success' || type === 'error') ? 5000 : 3000;
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease-out reverse';
+                setTimeout(() => {
+                    toast.remove();
+                    checkToastContainer();
+                }, 300);
+            }, timeout);
+            
+            return toast;
+        }
+        
+        function checkToastContainer() {
+            const container = document.getElementById('toastContainer');
+            if (container && container.children.length === 0) {
+                container.style.display = 'none';
+            }
+        }
+        
+        async function showEmailPrompt(partnerId) {
+            return new Promise(async (resolve) => {
+                // Užkrauti kontaktus
+                let contacts = [];
+                if (partnerId) {
+                    try {
+                        const token = localStorage.getItem('token') || '';
+                        let baseUrl = window.location.origin;
+                        if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                            baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                        }
+                        const response = await fetch(`${baseUrl}/api/partners/contacts/?partner=${partnerId}`, {
+                            headers: {
+                                'Authorization': 'Bearer ' + token
+                            },
+                            credentials: 'include'
+                        });
+                        if (response.ok) {
+                            const data = await response.json();
+                            contacts = data.results || data || [];
+                        }
+                    } catch (error) {
+                        console.error('Klaida užkraunant kontaktus:', error);
+                    }
+                }
+                
+                // Sukurti modal dialog
+                const modal = document.createElement('div');
+                modal.style.cssText = `
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background: rgba(0, 0, 0, 0.5);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    z-index: 10001;
+                `;
+                
+                const dialog = document.createElement('div');
+                dialog.style.cssText = `
+                    background: white;
+                    padding: 24px;
+                    border-radius: 8px;
+                    min-width: 500px;
+                    max-width: 700px;
+                    max-height: 80vh;
+                    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+                    display: flex;
+                    flex-direction: column;
+                `;
+                
+                // State management
+                const selectedEmails = new Map(); // contactId -> email
+                const editingEmails = new Set(); // contactId -> ar redaguojamas
+                let showNewContactForm = false; // ar rodyti naujo kontakto formą
+                
+                // Close funkcija
+                const close = () => {
+                    document.body.removeChild(modal);
+                };
+                
+                // Funkcija atnaujinti modalą
+                const updateModal = () => {
+                    let html = `
+                        <h3 style="margin: 0 0 16px 0; font-size: 18px;">Siųsti el. paštu</h3>
+                        <div id="contactsContainer" style="flex: 1; overflow-y: auto; margin-bottom: 16px; max-height: 400px;">
+                    `;
+                    
+                    // Rodyti esamus kontaktus
+                    contacts.forEach(contact => {
+                        const email = selectedEmails.get(contact.id) || contact.email || '';
+                        const isChecked = selectedEmails.has(contact.id);
+                        const isEditing = editingEmails.has(contact.id);
+                        const escapedEmail = (email || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+                        html += `
+                            <div style="border: 1px solid #ddd; border-radius: 3px; padding: 6px 8px; margin-bottom: 4px; background: ${isChecked ? '#f0f8ff' : '#fff'};">
+                                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;">
+                                    <input type="checkbox" id="contact_${contact.id}" ${isChecked ? 'checked' : ''} 
+                                           style="cursor: pointer; margin: 0; flex-shrink: 0;" 
+                                           data-contact-id="${contact.id}"
+                                           data-default-email="${(contact.email || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;')}">
+                                    <label for="contact_${contact.id}" style="cursor: pointer; margin: 0; font-size: 12px; flex-shrink: 0; white-space: nowrap;">
+                                        <strong style="font-size: 12px;">${((contact.first_name || '') + ' ' + (contact.last_name || '')).trim() || 'Kontaktinis asmuo'}</strong>
+                                        ${contact.position ? `<span style="font-size: 11px; color: #666; margin-left: 4px;">• ${contact.position}</span>` : ''}
+                                    </label>
+                                    <span style="color: #ccc; margin: 0 4px; flex-shrink: 0;">|</span>
+                                    ${isEditing ? `
+                                        <input type="email" 
+                                               id="email_${contact.id}" 
+                                               value="${escapedEmail}" 
+                                               placeholder="El. pašto adresas"
+                                               style="flex: 1; min-width: 150px; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;"
+                                               data-contact-id="${contact.id}">
+                                        <button type="button" 
+                                                id="saveEmail_${contact.id}"
+                                                data-contact-id="${contact.id}"
+                                                style="padding: 4px 8px; border: none; background: #28a745; color: white; border-radius: 3px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;">
+                                            ✓
+                                        </button>
+                                    ` : `
+                                        <div style="flex: 1; min-width: 150px; padding: 2px 0; font-size: 11px; color: ${email ? '#333' : '#999'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            ${email || 'Nėra el. pašto'}
+                                        </div>
+                                        <button type="button" 
+                                                id="editEmail_${contact.id}"
+                                                data-contact-id="${contact.id}"
+                                                style="padding: 4px 8px; border: 1px solid #ddd; background: white; border-radius: 3px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;"
+                                                title="Redaguoti email">
+                                            ✏️
+                                        </button>
+                                    `}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    // "+" mygtukas pridėti naują kontaktą
+                    html += `
+                        <div style="margin-top: 8px;">
+                            ${!showNewContactForm ? `
+                                <button type="button" id="showNewContactBtn" style="display: flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px dashed #ddd; background: #f9f9f9; border-radius: 3px; cursor: pointer; font-size: 12px; color: #666;">
+                                    <span style="font-size: 16px;">+</span>
+                                    <span>Pridėti naują kontaktą</span>
+                                </button>
+                            ` : `
+                                <div style="border: 1px solid #ddd; border-radius: 3px; padding: 8px; background: #f9f9f9;">
+                                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+                                        <input type="text" id="newFirstName" placeholder="Vardas" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;">
+                                        <input type="text" id="newLastName" placeholder="Pavardė" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;">
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 6px;">
+                                        <input type="email" id="newEmail" placeholder="El. pašto adresas" style="flex: 1; padding: 4px 6px; border: 1px solid #ddd; border-radius: 3px; font-size: 12px; box-sizing: border-box;">
+                                        <input type="checkbox" id="newEmailCheck" style="cursor: pointer; flex-shrink: 0;">
+                                        <label for="newEmailCheck" style="cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;">Siųsti</label>
+                                        <button type="button" id="hideNewContactBtn" style="padding: 4px 8px; border: 1px solid #ddd; background: white; border-radius: 3px; cursor: pointer; font-size: 11px; white-space: nowrap; flex-shrink: 0;">✕</button>
+                                    </div>
+                                </div>
+                            `}
+                        </div>
+                    `;
+                    
+                    html += `</div>`;
+                    html += `
+                        <div style="display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid #eee; padding-top: 16px;">
+                            <button id="cancelBtn" style="padding: 8px 16px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; font-size: 14px;">Atšaukti</button>
+                            <button id="sendBtn" style="padding: 8px 16px; border: none; background: #28a745; color: white; border-radius: 4px; cursor: pointer; font-size: 14px;">Siųsti</button>
+                        </div>
+                    `;
+                    
+                    dialog.innerHTML = html;
+                    
+                    // Event handlers
+                    dialog.querySelectorAll('input[type="checkbox"][data-contact-id]').forEach(checkbox => {
+                        const contactId = parseInt(checkbox.getAttribute('data-contact-id'));
+                        const defaultEmail = checkbox.getAttribute('data-default-email') || '';
+                        checkbox.addEventListener('change', () => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            if (checkbox.checked) {
+                                selectedEmails.set(contactId, emailInput ? emailInput.value.trim() : defaultEmail);
+                            } else {
+                                selectedEmails.delete(contactId);
+                            }
+                            updateModal();
+                        });
+                    });
+                    
+                    // Redagavimo mygtukai
+                    dialog.querySelectorAll('button[id^="editEmail_"]').forEach(btn => {
+                        const contactId = parseInt(btn.getAttribute('data-contact-id'));
+                        btn.addEventListener('click', () => {
+                            editingEmails.add(contactId);
+                            updateModal();
+                        });
+                    });
+                    
+                    // Išsaugojimo mygtukai
+                    dialog.querySelectorAll('button[id^="saveEmail_"]').forEach(btn => {
+                        const contactId = parseInt(btn.getAttribute('data-contact-id'));
+                        btn.addEventListener('click', () => {
+                            const emailInput = document.getElementById(`email_${contactId}`);
+                            const newEmail = emailInput ? emailInput.value.trim() : '';
+                            if (newEmail) {
+                                selectedEmails.set(contactId, newEmail);
+                            }
+                            editingEmails.delete(contactId);
+                            updateModal();
+                        });
+                    });
+                    
+                    // Email input'ų event handlers
+                    dialog.querySelectorAll('input[type="email"][data-contact-id]').forEach(emailInput => {
+                        const contactId = parseInt(emailInput.getAttribute('data-contact-id'));
+                        emailInput.addEventListener('keydown', (e) => {
+                            if (e.key === 'Enter') {
+                                const saveBtn = document.getElementById(`saveEmail_${contactId}`);
+                                if (saveBtn) {
+                                    saveBtn.click();
+                                }
+                            } else if (e.key === 'Escape') {
+                                editingEmails.delete(contactId);
+                                updateModal();
+                            }
+                        });
+                    });
+                    
+                    // Event handler'iai "+" ir "✕" mygtukams
+                    const showNewContactBtn = dialog.querySelector('#showNewContactBtn');
+                    if (showNewContactBtn) {
+                        showNewContactBtn.addEventListener('click', () => {
+                            showNewContactForm = true;
+                            updateModal();
+                        });
+                    }
+                    
+                    const hideNewContactBtn = dialog.querySelector('#hideNewContactBtn');
+                    if (hideNewContactBtn) {
+                        hideNewContactBtn.addEventListener('click', () => {
+                            showNewContactForm = false;
+                            updateModal();
+                        });
+                    }
+                    
+                    // Event handler'iai "Atšaukti" ir "Siųsti" mygtukams
+                    const cancelBtn = dialog.querySelector('#cancelBtn');
+                    const sendBtn = dialog.querySelector('#sendBtn');
+                    
+                    if (cancelBtn) {
+                        cancelBtn.onclick = () => {
+                            close();
+                            resolve(null);
+                        };
+                    }
+                    
+                    if (sendBtn) {
+                        sendBtn.onclick = () => {
+                            const emails = [];
+                            const contactsToAdd = [];
+                            
+                            // Rinkti pasirinktus email'us iš kontaktų
+                            selectedEmails.forEach((email, contactId) => {
+                                const emailInput = document.getElementById(`email_${contactId}`);
+                                const finalEmail = (emailInput ? emailInput.value.trim() : email.trim()) || email.trim();
+                                if (finalEmail) {
+                                    emails.push(finalEmail);
+                                }
+                            });
+                            
+                            // Rinkti naują email, jei pasirinktas
+                            const newEmailCheck = document.getElementById('newEmailCheck');
+                            const newEmail = document.getElementById('newEmail');
+                            if (newEmailCheck && newEmailCheck.checked && newEmail && newEmail.value.trim()) {
+                                emails.push(newEmail.value.trim());
+                                contactsToAdd.push({
+                                    email: newEmail.value.trim(),
+                                    first_name: (document.getElementById('newFirstName')?.value || '').trim(),
+                                    last_name: (document.getElementById('newLastName')?.value || '').trim()
+                                });
+                            }
+                            
+                            if (emails.length === 0) {
+                                showToast('Pasirinkite bent vieną el. pašto adresą', 'error');
+                                return;
+                            }
+                            
+                            close();
+                            resolve({ emails, contactsToAdd, partnerId });
+                        };
+                    }
+                };
+                
+                updateModal();
+                modal.appendChild(dialog);
+                document.body.appendChild(modal);
+                
+                // Modal background click handler
+                modal.onclick = (e) => {
+                    if (e.target === modal) {
+                        const cancelBtn = dialog.querySelector('#cancelBtn');
+                        if (cancelBtn) {
+                            cancelBtn.click();
+                        }
+                    }
+                };
+            });
+        }
+        
+        async function sendEmail() {
+            {% if invoice.id %}
+                const invoiceId = {{ invoice.id }};
+                const partnerId = {% if invoice.partner %}{{ invoice.partner.id }}{% else %}null{% endif %};
+                const result = await showEmailPrompt(partnerId);
+                
+                if (!result || !result.emails || result.emails.length === 0) {
+                    return; // Vartotojas atšaukė arba nepasirinko email'ų
+                }
+                
+                const loadingToast = showToast('Siunčiama...', 'info');
+                
+                try {
+                    let baseUrl = window.location.origin;
+                    
+                    // Jei esame frontend porte (3000), pakeisti į backend portą (8000)
+                    if (window.location.port === '3000' || (window.location.port === '' && window.location.hostname === 'localhost')) {
+                        baseUrl = window.location.protocol + '//' + window.location.hostname + ':8000';
+                    }
+                    
+                    const response = await fetch(`${baseUrl}/api/invoices/sales/${invoiceId}/send_email/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
+                        },
+                        credentials: 'include',
+                        body: JSON.stringify({
+                            emails: result.emails,
+                            contacts_to_add: result.contactsToAdd || []
+                        })
+                    });
+                    
+                    // Pašalinti "Siunčiama..." pranešimą
+                    if (loadingToast) {
+                        loadingToast.remove();
+                    }
+                    
+                    const contentType = response.headers.get('content-type');
+                    if (contentType && contentType.includes('application/json')) {
+                        const data = await response.json();
+                        if (data.success && data.sent) {
+                            showToast(data.message || 'El. laiškas sėkmingai išsiųstas!', 'success');
+                        } else {
+                            showToast(data.error || data.message || 'El. laiškas neišsiųstas. Patikrinkite nustatymus.', 'error');
+                        }
+                    } else {
+                        const text = await response.text();
+                        let errorMsg = 'Klaida siunčiant el. laišką';
+                        if (response.status === 400) {
+                            errorMsg = 'Neteisingi duomenys arba SMTP nustatymai';
+                        } else if (response.status === 500) {
+                            errorMsg = 'Serverio klaida. Patikrinkite SMTP nustatymus.';
+                        }
+                        showToast(errorMsg + ' (Status: ' + response.status + ')', 'error');
+                    }
+                } catch (error) {
+                    console.error('Klaida:', error);
+                    // Pašalinti "Siunčiama..." pranešimą
+                    if (loadingToast) {
+                        loadingToast.remove();
+                    }
+                    showToast('Klaida siunčiant el. laišką: ' + error.message, 'error');
+                }
+            {% endif %}
+        }
+    </script>
+</body>
+</html>

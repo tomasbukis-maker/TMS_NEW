@@ -1,0 +1,626 @@
+.dashboard-new-container {
+  min-height: calc(100vh - 60px);
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  padding: 15px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', sans-serif;
+  max-width: 100%;
+}
+
+/* Period Header */
+.period-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  padding-bottom: 15px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.btn-refresh {
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-refresh:hover {
+  background: #2980b9;
+  transform: scale(1.05);
+}
+
+.last-refresh {
+  font-size: 12px;
+  color: #7f8c8d;
+}
+
+/* Period Selector */
+.dashboard-period-selector {
+  background: white;
+  padding: 10px 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 15px;
+}
+
+.period-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.btn-refresh {
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.btn-refresh:hover {
+  background: #2980b9;
+  transform: scale(1.05);
+}
+
+.last-refresh {
+  font-size: 10px;
+  color: #7f8c8d;
+}
+
+.period-quick-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.period-btn {
+  padding: 4px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  background: white;
+  color: #495057;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.period-btn:hover {
+  border-color: #3498db;
+  color: #3498db;
+}
+
+.period-btn.active {
+  background: #3498db;
+  color: white;
+  border-color: #3498db;
+}
+
+.custom-date-range {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+.date-input {
+  padding: 4px 8px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.period-options {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-top: 8px;
+  border-top: 1px solid #e0e0e0;
+  flex-wrap: wrap;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #495057;
+  cursor: pointer;
+}
+
+.filter-select {
+  padding: 4px 8px;
+  border: 1px solid #dee2e6;
+  border-radius: 4px;
+  font-size: 11px;
+  background: white;
+  cursor: pointer;
+}
+
+/* Metrics Grid */
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.metric-card {
+  background: white;
+  padding: 16px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.3s;
+  border-left: 4px solid;
+}
+
+.metric-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.metric-profit {
+  border-left-color: #27ae60;
+}
+
+.metric-warning {
+  border-left-color: #f39c12;
+}
+
+.metric-info {
+  border-left-color: #3498db;
+}
+
+.metric-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.metric-icon {
+  font-size: 24px;
+}
+
+.metric-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #7f8c8d;
+  letter-spacing: 0.5px;
+}
+
+.metric-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: #2c3e50;
+  margin-bottom: 6px;
+}
+
+.metric-details {
+  font-size: 12px;
+  color: #95a5a6;
+  line-height: 1.6;
+}
+
+/* Alerts */
+.dashboard-alerts {
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 15px;
+}
+
+.alerts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.alert-item {
+  padding: 12px 16px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+}
+
+.alert-item:hover {
+  transform: translateX(4px);
+}
+
+.alert-error {
+  background: #fee;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.alert-warning {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+}
+
+.alert-info {
+  background: #d1ecf1;
+  border: 1px solid #bee5eb;
+  color: #0c5460;
+}
+
+.alert-arrow {
+  font-size: 16px;
+  opacity: 0.7;
+}
+
+/* Content Grid */
+.dashboard-content-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 15px;
+}
+
+@media (max-width: 1400px) {
+  .dashboard-content-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 900px) {
+  .dashboard-content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboard-column {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.dashboard-section {
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.section-header {
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2c3e50;
+}
+
+.section-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Finance Items */
+.finance-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+}
+
+.finance-label {
+  font-size: 13px;
+  color: #495057;
+}
+
+.finance-value {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.finance-value.positive {
+  color: #27ae60;
+}
+
+.finance-value.negative {
+  color: #e74c3c;
+}
+
+/* Invoices Grid */
+.invoices-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.invoice-card {
+  padding: 16px;
+  border-radius: 8px;
+  border: 2px solid;
+  text-align: center;
+}
+
+.invoice-paid {
+  background: #d4edda;
+  border-color: #c3e6cb;
+  color: #155724;
+}
+
+.invoice-unpaid {
+  background: #fff3cd;
+  border-color: #ffeaa7;
+  color: #856404;
+}
+
+.invoice-overdue {
+  background: #f8d7da;
+  border-color: #f5c6cb;
+  color: #721c24;
+}
+
+.invoice-label {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.invoice-count {
+  font-size: 24px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.invoice-amount {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.invoice-detail {
+  font-size: 10px;
+  margin-top: 4px;
+  opacity: 0.7;
+}
+
+/* Tracking Items */
+.tracking-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tracking-item:hover {
+  transform: translateX(4px);
+}
+
+.tracking-warning {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  color: #856404;
+}
+
+.tracking-info {
+  background: #d1ecf1;
+  border: 1px solid #bee5eb;
+  color: #0c5460;
+}
+
+.tracking-error {
+  background: #f8d7da;
+  border: 1px solid #f5c6cb;
+  color: #721c24;
+}
+
+.tracking-count {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+/* Upcoming Orders */
+.upcoming-orders {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.subsection-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 10px;
+}
+
+.upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.upcoming-item {
+  padding: 10px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  border: 1px solid #dee2e6;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 12px;
+}
+
+.upcoming-item:hover {
+  background: #e9ecef;
+  transform: translateX(4px);
+}
+
+.upcoming-number {
+  font-weight: 700;
+  color: #495057;
+  font-family: monospace;
+  margin-bottom: 4px;
+}
+
+.upcoming-route {
+  color: #6c757d;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.upcoming-dates {
+  color: #95a5a6;
+  font-size: 10px;
+}
+
+/* Overdue Lists */
+.overdue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.overdue-item {
+  padding: 12px;
+  background: #fff3cd;
+  border-radius: 8px;
+  border: 1px solid #ffc107;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.overdue-item:hover {
+  background: #ffeaa7;
+  transform: translateX(4px);
+}
+
+.overdue-name {
+  font-weight: 600;
+  color: #856404;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.overdue-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.overdue-amount {
+  font-weight: 700;
+  color: #e74c3c;
+}
+
+.overdue-date {
+  font-size: 10px;
+  color: #999;
+}
+
+/* Loading & Error States */
+.dashboard-loading,
+.dashboard-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  background: white;
+  border-radius: 12px;
+  padding: 40px;
+}
+
+.spinner {
+  width: 50px;
+  height: 50px;
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #3498db;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  background: #2980b9;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .dashboard-new-container {
+    padding: 10px;
+  }
+
+  .dashboard-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .period-quick-buttons {
+    flex-direction: column;
+  }
+
+  .period-btn {
+    width: 100%;
+  }
+}

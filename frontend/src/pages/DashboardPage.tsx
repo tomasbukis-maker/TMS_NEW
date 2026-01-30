@@ -1,0 +1,927 @@
+import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../services/api';
+import { useModule } from '../context/ModuleContext';
+import ExpenseDashboardPage from './ExpenseDashboardPage';
+import './DashboardPage.css';
+
+interface DashboardStats {
+  invoices: {
+    unpaid_sales: { count: number; total: string; oldest_invoices?: any[] };
+    paid_sales: { count: number; total: string };
+    unpaid_purchase: { count: number; total: string; oldest_invoices?: any[] };
+    paid_purchase: { count: number; total: string };
+    overdue_sales: { count: number; oldest_invoices?: any[] };
+    overdue_purchase: { count: number; oldest_invoices?: any[] };
+  };
+  orders: { finished: number; unfinished: number; new: number };
+  clients: { new_this_month: number };
+  finance?: {
+    monthly_profit: string;
+    monthly_revenue: string;
+    monthly_expenses: string;
+    cash_flow: string;
+    paid_revenue: string;
+    unpaid_revenue: string;
+    paid_expenses: string;
+    unpaid_expenses: string;
+  };
+  orders_tracking?: {
+    without_carriers: number;
+    finished_without_invoices: number;
+    with_overdue_invoices: number;
+    upcoming: any[];
+  };
+  carriers_tracking?: {
+    without_invoices: { count: number; list: any[] };
+    with_overdue: { count: number; list: any[] };
+  };
+  alerts?: any[];
+}
+
+const DashboardPage: React.FC = () => {
+  const { t } = useTranslation();
+  const { activeModule } = useModule();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [clientsOverdue, setClientsOverdue] = useState<any[]>([]);
+  const [carriersOverdue, setCarriersOverdue] = useState<any[]>([]);
+  const [periodType, setPeriodType] = useState<'month' | 'all'>('all');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const [statsRes, clientsRes, carriersRes] = await Promise.all([
+          api.get(`/dashboard/statistics/?period_type=${periodType}`),
+          api.get('/dashboard/clients-overdue/'),
+          api.get('/dashboard/carriers-overdue/')
+        ]);
+        setStats(statsRes.data);
+        setClientsOverdue(clientsRes.data.clients || []);
+        setCarriersOverdue(carriersRes.data.carriers || []);
+      } catch (err: any) {
+        console.error('Klaida užkraunant duomenis:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [periodType]);
+
+  const formatCurrency = (amount: string) => {
+    const num = parseFloat(amount);
+    return new Intl.NumberFormat('lt-LT', {
+      style: 'currency',
+      currency: 'EUR',
+      minimumFractionDigits: 2,
+    }).format(num);
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '-';
+    return new Date(dateStr).toLocaleDateString('lt-LT', { day: '2-digit', month: '2-digit' });
+  };
+
+  if (activeModule === 'expenses') {
+    return <ExpenseDashboardPage />;
+  }
+
+  if (loading) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+        Kraunama...
+      </div>
+    );
+  }
+
+  if (!stats) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', color: '#666' }}>
+        Nepavyko užkrauti statistikos
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '10px', maxWidth: '100%', backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
+      {/* Laikotarpio pasirinkimas */}
+      <div style={{ 
+        marginBottom: '10px', 
+        padding: '8px 12px', 
+        backgroundColor: 'white', 
+        borderRadius: '6px',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px'
+      }}>
+        <span style={{ fontSize: '11px', fontWeight: '600', color: '#495057' }}>Laikotarpis:</span>
+        <button
+          onClick={() => setPeriodType('all')}
+          style={{
+            padding: '4px 12px',
+            fontSize: '10px',
+            fontWeight: '600',
+            border: '1px solid #dee2e6',
+            borderRadius: '4px',
+            backgroundColor: periodType === 'all' ? '#007bff' : 'white',
+            color: periodType === 'all' ? 'white' : '#495057',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+        >
+          Viso laikotarpio
+        </button>
+        <button
+          onClick={() => setPeriodType('month')}
+          style={{
+            padding: '4px 12px',
+            fontSize: '10px',
+            fontWeight: '600',
+            border: '1px solid #dee2e6',
+            borderRadius: '4px',
+            backgroundColor: periodType === 'month' ? '#007bff' : 'white',
+            color: periodType === 'month' ? 'white' : '#495057',
+            cursor: 'pointer',
+            transition: 'all 0.2s'
+          }}
+        >
+          Šis mėnuo
+        </button>
+        <span style={{ fontSize: '9px', color: '#999', marginLeft: 'auto' }}>
+          {periodType === 'all' ? 'Rodo visus duomenis nuo pradžių' : 'Rodo tik šio mėnesio duomenis'}
+        </span>
+      </div>
+
+      {/* Viršutinė greitosios statistikos eilutė */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+        gap: '8px',
+        marginBottom: '10px'
+      }}>
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '6px', 
+          padding: '10px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderLeft: '4px solid #28a745',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'; }}
+        >
+          <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>💰 Pelnas</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#28a745' }}>
+            {stats.finance ? formatCurrency(stats.finance.monthly_profit) : '0.00 EUR'}
+          </div>
+          {stats.finance && (
+            <div style={{ fontSize: '8px', color: '#999', marginTop: '4px', lineHeight: '1.3' }}>
+              Pajamos: {formatCurrency(stats.finance.monthly_revenue)}<br/>
+              Išlaidos: {formatCurrency(stats.finance.monthly_expenses)}
+            </div>
+          )}
+        </div>
+
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '6px', 
+          padding: '10px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderLeft: '4px solid #dc3545',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+        onClick={() => navigate('/invoices?status=overdue')}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'; }}
+        >
+          <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>⚠️ Vėluojančios</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#dc3545' }}>
+            {stats.invoices.overdue_sales.count + stats.invoices.overdue_purchase.count}
+          </div>
+          <div style={{ fontSize: '8px', color: '#999', marginTop: '4px' }}>
+            Išrašytos: {stats.invoices.overdue_sales.count} | Gautos: {stats.invoices.overdue_purchase.count}
+          </div>
+        </div>
+
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '6px', 
+          padding: '10px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderLeft: '4px solid #007bff',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+        onClick={() => navigate('/orders')}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'; }}
+        >
+          <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>📋 Užsakymai</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#007bff' }}>
+            {stats.orders.new + stats.orders.unfinished}
+          </div>
+          <div style={{ fontSize: '8px', color: '#999', marginTop: '4px' }}>
+            Nauji: {stats.orders.new} | Nebaigti: {stats.orders.unfinished} | Baigti: {stats.orders.finished}
+          </div>
+        </div>
+
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '6px', 
+          padding: '10px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderLeft: '4px solid #ffc107',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+        onClick={() => navigate('/invoices?status=unpaid')}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'; }}
+        >
+          <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>📄 Neapmokėtos</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#ffc107' }}>
+            {stats.invoices.unpaid_sales.count + stats.invoices.unpaid_purchase.count}
+          </div>
+          <div style={{ fontSize: '8px', color: '#999', marginTop: '4px' }}>
+            Išrašytos: {stats.invoices.unpaid_sales.count} | Gautos: {stats.invoices.unpaid_purchase.count}
+          </div>
+        </div>
+
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '6px', 
+          padding: '10px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          borderLeft: '4px solid #17a2b8',
+          cursor: 'pointer',
+          transition: 'all 0.2s'
+        }}
+        onClick={() => navigate('/partners?is_client=true')}
+        onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(0)'; e.currentTarget.style.boxShadow = '0 1px 3px rgba(0,0,0,0.1)'; }}
+        >
+          <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>👥 Klientai</div>
+          <div style={{ fontSize: '18px', fontWeight: '700', color: '#17a2b8' }}>
+            {stats.clients.new_this_month}
+          </div>
+          <div style={{ fontSize: '8px', color: '#999', marginTop: '4px' }}>
+            Nauji šį mėnesį
+          </div>
+        </div>
+      </div>
+
+      {/* Pranešimai */}
+      {stats.alerts && stats.alerts.length > 0 && (
+        <div style={{ 
+          backgroundColor: 'white', 
+          borderRadius: '6px', 
+          padding: '10px',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+          marginBottom: '10px'
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '8px', color: '#495057', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span>⚠️</span>
+            <span>SKUBŪS PRANEŠIMAI</span>
+            <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({stats.alerts.length})</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '6px' }}>
+            {stats.alerts.map((alert, idx) => (
+              <div
+                key={idx}
+                onClick={() => navigate(alert.link)}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: '4px',
+                  backgroundColor: alert.type === 'error' ? '#fee' : alert.type === 'warning' ? '#fff3cd' : '#d1ecf1',
+                  color: alert.type === 'error' ? '#721c24' : alert.type === 'warning' ? '#856404' : '#0c5460',
+                  cursor: 'pointer',
+                  border: `1px solid ${alert.type === 'error' ? '#f5c6cb' : alert.type === 'warning' ? '#ffeaa7' : '#bee5eb'}`,
+                  fontSize: '10px',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '8px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateX(2px)';
+                  e.currentTarget.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateX(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                <span style={{ fontWeight: '500', flex: 1 }}>{alert.message}</span>
+                <span style={{ fontSize: '9px', opacity: 0.7 }}>→</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Pagrindinė informacija - 3 stulpeliai */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', 
+        gap: '10px'
+      }}>
+        {/* Kairė pusė - Finansai ir Sąskaitos */}
+        <div style={{ display: 'grid', gap: '10px' }}>
+          {/* Finansai */}
+          {stats.finance && (
+            <div style={{ 
+              backgroundColor: 'white', 
+              borderRadius: '6px', 
+              padding: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>💰</span>
+                <span>FINANSAI</span>
+              </div>
+              <div style={{ display: 'grid', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', padding: '6px', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                  <span style={{ color: '#666' }}>Pinigų srautas:</span>
+                  <span style={{ fontWeight: '700', color: stats.finance.cash_flow.startsWith('-') ? '#dc3545' : '#28a745', fontSize: '12px' }}>
+                    {formatCurrency(stats.finance.cash_flow)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', padding: '4px 6px' }}>
+                  <span style={{ color: '#666' }}>Apmokėtos išrašytos:</span>
+                  <span style={{ fontWeight: '600', color: '#28a745' }}>
+                    {formatCurrency(stats.finance.paid_revenue)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', padding: '4px 6px' }}>
+                  <span style={{ color: '#666' }}>Neapmokėtos išrašytos:</span>
+                  <span style={{ fontWeight: '600', color: '#dc3545' }}>
+                    {formatCurrency(stats.finance.unpaid_revenue)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', padding: '4px 6px' }}>
+                  <span style={{ color: '#666' }}>Apmokėtos gautos:</span>
+                  <span style={{ fontWeight: '600', color: '#28a745' }}>
+                    {formatCurrency(stats.finance.paid_expenses)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', padding: '4px 6px' }}>
+                  <span style={{ color: '#666' }}>Neapmokėtos gautos:</span>
+                  <span style={{ fontWeight: '600', color: '#dc3545' }}>
+                    {formatCurrency(stats.finance.unpaid_expenses)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Sąskaitos */}
+          <div style={{ 
+            backgroundColor: 'white', 
+            borderRadius: '6px', 
+            padding: '12px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>📄</span>
+              <span>SĄSKAITOS</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+              <div style={{ padding: '8px', backgroundColor: '#d4edda', borderRadius: '4px', border: '1px solid #c3e6cb' }}>
+                <div style={{ fontSize: '9px', color: '#155724', marginBottom: '4px', fontWeight: '600' }}>Išrašytos apmokėtos</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#155724' }}>
+                  {stats.invoices.paid_sales.count}
+                </div>
+                <div style={{ fontSize: '9px', color: '#155724', marginTop: '2px' }}>
+                  {formatCurrency(stats.invoices.paid_sales.total)}
+                </div>
+              </div>
+              <div style={{ padding: '8px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffeaa7' }}>
+                <div style={{ fontSize: '9px', color: '#856404', marginBottom: '4px', fontWeight: '600' }}>Išrašytos neapmokėtos</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#856404' }}>
+                  {stats.invoices.unpaid_sales.count}
+                </div>
+                <div style={{ fontSize: '9px', color: '#856404', marginTop: '2px' }}>
+                  {formatCurrency(stats.invoices.unpaid_sales.total)}
+                </div>
+              </div>
+              <div style={{ padding: '8px', backgroundColor: '#f8d7da', borderRadius: '4px', border: '1px solid #f5c6cb' }}>
+                <div style={{ fontSize: '9px', color: '#721c24', marginBottom: '4px', fontWeight: '600' }}>Išrašytos vėluojančios</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#721c24' }}>
+                  {stats.invoices.overdue_sales.count}
+                </div>
+                {stats.invoices.overdue_sales.oldest_invoices && stats.invoices.overdue_sales.oldest_invoices.length > 0 && (
+                  <div style={{ fontSize: '8px', color: '#721c24', marginTop: '2px' }}>
+                    Seniausia: {formatDate(stats.invoices.overdue_sales.oldest_invoices[0].due_date)}
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: '8px', backgroundColor: '#d4edda', borderRadius: '4px', border: '1px solid #c3e6cb' }}>
+                <div style={{ fontSize: '9px', color: '#155724', marginBottom: '4px', fontWeight: '600' }}>Gautos apmokėtos</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#155724' }}>
+                  {stats.invoices.paid_purchase.count}
+                </div>
+                <div style={{ fontSize: '9px', color: '#155724', marginTop: '2px' }}>
+                  {formatCurrency(stats.invoices.paid_purchase.total)}
+                </div>
+              </div>
+              <div style={{ padding: '8px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffeaa7' }}>
+                <div style={{ fontSize: '9px', color: '#856404', marginBottom: '4px', fontWeight: '600' }}>Gautos neapmokėtos</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#856404' }}>
+                  {stats.invoices.unpaid_purchase.count}
+                </div>
+                <div style={{ fontSize: '9px', color: '#856404', marginTop: '2px' }}>
+                  {formatCurrency(stats.invoices.unpaid_purchase.total)}
+                </div>
+              </div>
+              <div style={{ padding: '8px', backgroundColor: '#f8d7da', borderRadius: '4px', border: '1px solid #f5c6cb' }}>
+                <div style={{ fontSize: '9px', color: '#721c24', marginBottom: '4px', fontWeight: '600' }}>Gautos vėluojančios</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#721c24' }}>
+                  {stats.invoices.overdue_purchase.count}
+                </div>
+                {stats.invoices.overdue_purchase.oldest_invoices && stats.invoices.overdue_purchase.oldest_invoices.length > 0 && (
+                  <div style={{ fontSize: '8px', color: '#721c24', marginTop: '2px' }}>
+                    Seniausia: {formatDate(stats.invoices.overdue_purchase.oldest_invoices[0].due_date)}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Seniausios neapmokėtos sąskaitos */}
+          {((stats.invoices.unpaid_sales.oldest_invoices && stats.invoices.unpaid_sales.oldest_invoices.length > 0) || 
+            (stats.invoices.unpaid_purchase.oldest_invoices && stats.invoices.unpaid_purchase.oldest_invoices.length > 0)) && (
+            <div style={{ 
+              backgroundColor: 'white', 
+              borderRadius: '6px', 
+              padding: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>⏰</span>
+                <span>SENIAUSIOS NEAPMOKĖTOS</span>
+              </div>
+              <div style={{ display: 'grid', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
+                {stats.invoices.unpaid_sales.oldest_invoices?.slice(0, 3).map((inv: any, idx: number) => (
+                  <div
+                    key={idx}
+                    onClick={() => navigate(`/invoices?invoice_number=${inv.invoice_number}`)}
+                    style={{
+                      padding: '6px 8px',
+                      backgroundColor: '#fff3cd',
+                      borderRadius: '4px',
+                      border: '1px solid #ffeaa7',
+                      cursor: 'pointer',
+                      fontSize: '9px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#ffeaa7';
+                      e.currentTarget.style.transform = 'translateX(2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fff3cd';
+                      e.currentTarget.style.transform = 'translateX(0)';
+                    }}
+                  >
+                    <div style={{ fontWeight: '600', color: '#856404', fontFamily: 'monospace' }}>
+                      {inv.invoice_number}
+                    </div>
+                    <div style={{ fontSize: '8px', color: '#666', marginTop: '2px' }}>
+                      {inv.partner_name} • {formatCurrency(inv.amount_total)}
+                    </div>
+                    {inv.due_date && (
+                      <div style={{ fontSize: '8px', color: '#dc3545', marginTop: '2px' }}>
+                        Terminas: {formatDate(inv.due_date)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {stats.invoices.unpaid_purchase.oldest_invoices?.slice(0, 3).map((inv: any, idx: number) => (
+                  <div
+                    key={`p-${idx}`}
+                    onClick={() => navigate(`/invoices?invoice_number=${inv.invoice_number}`)}
+                    style={{
+                      padding: '6px 8px',
+                      backgroundColor: '#fff3cd',
+                      borderRadius: '4px',
+                      border: '1px solid #ffeaa7',
+                      cursor: 'pointer',
+                      fontSize: '9px',
+                      transition: 'all 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#ffeaa7';
+                      e.currentTarget.style.transform = 'translateX(2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fff3cd';
+                      e.currentTarget.style.transform = 'translateX(0)';
+                    }}
+                  >
+                    <div style={{ fontWeight: '600', color: '#856404', fontFamily: 'monospace' }}>
+                      {inv.invoice_number}
+                    </div>
+                    <div style={{ fontSize: '8px', color: '#666', marginTop: '2px' }}>
+                      {inv.partner_name} • {formatCurrency(inv.amount_total)}
+                    </div>
+                    {inv.due_date && (
+                      <div style={{ fontSize: '8px', color: '#dc3545', marginTop: '2px' }}>
+                        Terminas: {formatDate(inv.due_date)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Vidurys - Užsakymai */}
+        <div style={{ display: 'grid', gap: '10px' }}>
+          {/* Užsakymų sekimas */}
+          {stats.orders_tracking && (
+            <div style={{ 
+              backgroundColor: 'white', 
+              borderRadius: '6px', 
+              padding: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>📋</span>
+                <span>UŽSAKYMŲ SEKIMAS</span>
+              </div>
+              <div style={{ display: 'grid', gap: '6px' }}>
+                <div 
+                  onClick={() => navigate('/orders?status=new,assigned,executing')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#fff3cd', 
+                    borderRadius: '4px',
+                    border: '1px solid #ffeaa7',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#ffeaa7';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fff3cd';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#856404', fontWeight: '600' }}>⚠️ Be vežėjų</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#856404' }}>
+                    {stats.orders_tracking.without_carriers}
+                  </span>
+                </div>
+                <div 
+                  onClick={() => navigate('/orders?status=finished')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1ecf1', 
+                    borderRadius: '4px',
+                    border: '1px solid #bee5eb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bee5eb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1ecf1';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#0c5460', fontWeight: '600' }}>ℹ️ Be sąskaitų</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#0c5460' }}>
+                    {stats.orders_tracking.finished_without_invoices}
+                  </span>
+                </div>
+                <div 
+                  onClick={() => navigate('/orders')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#f8d7da', 
+                    borderRadius: '4px',
+                    border: '1px solid #f5c6cb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f5c6cb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#f8d7da';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#721c24', fontWeight: '600' }}>⚠️ Su vėluojančiomis</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#721c24' }}>
+                    {stats.orders_tracking.with_overdue_invoices}
+                  </span>
+                </div>
+              </div>
+              {stats.orders_tracking.upcoming && stats.orders_tracking.upcoming.length > 0 && (
+                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #eee' }}>
+                  <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '6px', color: '#666' }}>
+                    📅 Artimiausi užsakymai (7d.)
+                  </div>
+                  <div style={{ display: 'grid', gap: '4px', maxHeight: '150px', overflowY: 'auto' }}>
+                    {stats.orders_tracking.upcoming.map((order: any) => (
+                      <div
+                        key={order.id}
+                        onClick={() => navigate(`/orders?order_id=${order.id}`)}
+                        style={{
+                          padding: '6px 8px',
+                          backgroundColor: '#f8f9fa',
+                          borderRadius: '4px',
+                          border: '1px solid #dee2e6',
+                          cursor: 'pointer',
+                          fontSize: '9px',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#e9ecef';
+                          e.currentTarget.style.transform = 'translateX(2px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#f8f9fa';
+                          e.currentTarget.style.transform = 'translateX(0)';
+                        }}
+                      >
+                        <div style={{ fontWeight: '600', color: '#495057', fontFamily: 'monospace', marginBottom: '2px' }}>
+                          {order.order_number}
+                        </div>
+                        <div style={{ fontSize: '8px', color: '#6c757d' }}>
+                          {order.route_from || '-'} → {order.route_to || '-'}
+                        </div>
+                        {(order.loading_date || order.unloading_date) && (
+                          <div style={{ fontSize: '8px', color: '#999', marginTop: '2px' }}>
+                            {order.loading_date && `Pakrovimas: ${formatDate(order.loading_date)}`}
+                            {order.loading_date && order.unloading_date && ' • '}
+                            {order.unloading_date && `Iškrovimas: ${formatDate(order.unloading_date)}`}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Vežėjų sekimas */}
+          {stats.carriers_tracking && (
+            <div style={{ 
+              backgroundColor: 'white', 
+              borderRadius: '6px', 
+              padding: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🚚</span>
+                <span>VEŽĖJŲ SEKIMAS</span>
+              </div>
+              <div style={{ display: 'grid', gap: '6px' }}>
+                <div 
+                  onClick={() => navigate('/orders?status=finished')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1ecf1', 
+                    borderRadius: '4px',
+                    border: '1px solid #bee5eb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bee5eb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1ecf1';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#0c5460', fontWeight: '600' }}>ℹ️ Be sąskaitų</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#0c5460' }}>
+                    {stats.carriers_tracking.without_invoices.count}
+                  </span>
+                </div>
+                <div 
+                  onClick={() => navigate('/orders')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#fff3cd', 
+                    borderRadius: '4px',
+                    border: '1px solid #ffeaa7',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#ffeaa7';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#fff3cd';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#856404', fontWeight: '600' }}>⚠️ Su vėluojančiomis</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#856404' }}>
+                    {stats.carriers_tracking.with_overdue.count}
+                  </span>
+                </div>
+              </div>
+              {stats.carriers_tracking.with_overdue.list && stats.carriers_tracking.with_overdue.list.length > 0 && (
+                <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #eee' }}>
+                  <div style={{ fontSize: '10px', fontWeight: '600', marginBottom: '6px', color: '#666' }}>
+                    Vėluojančių sąrašas
+                  </div>
+                  <div style={{ display: 'grid', gap: '4px', maxHeight: '120px', overflowY: 'auto' }}>
+                    {stats.carriers_tracking.with_overdue.list.slice(0, 5).map((carrier: any, idx: number) => (
+                      <div
+                        key={idx}
+                        onClick={() => navigate(`/orders?order_id=${carrier.order_id}`)}
+                        style={{
+                          padding: '4px 6px',
+                          backgroundColor: '#fff3cd',
+                          borderRadius: '3px',
+                          cursor: 'pointer',
+                          fontSize: '9px',
+                          transition: 'all 0.2s',
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.backgroundColor = '#ffeaa7';
+                          e.currentTarget.style.transform = 'translateX(2px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.backgroundColor = '#fff3cd';
+                          e.currentTarget.style.transform = 'translateX(0)';
+                        }}
+                      >
+                        <div style={{ fontWeight: '600', color: '#856404', fontFamily: 'monospace' }}>
+                          {carrier.order_number}
+                        </div>
+                        <div style={{ fontSize: '8px', color: '#666' }}>
+                          {carrier.carrier_name}
+                          {carrier.overdue_days !== undefined && carrier.overdue_days > 0 && (
+                            <span style={{ color: '#dc3545', marginLeft: '4px' }}>
+                              ({carrier.overdue_days}d)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Dešinė pusė - Klientai ir Vežėjai su vėluojančiomis */}
+        <div style={{ display: 'grid', gap: '10px' }}>
+          {/* Klientai su vėluojančiomis */}
+          {clientsOverdue.length > 0 && (
+            <div style={{ 
+              backgroundColor: 'white', 
+              borderRadius: '6px', 
+              padding: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>👥</span>
+                <span>KLIENTAI SU VĖLUOJANČIOMIS</span>
+                <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({clientsOverdue.length})</span>
+              </div>
+              <div style={{ display: 'grid', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
+                {clientsOverdue.slice(0, 10).map((client) => (
+                  <div
+                    key={client.id}
+                    onClick={() => navigate(`/partners/${client.id}`)}
+                    style={{
+                      padding: '8px',
+                      backgroundColor: '#fff3cd',
+                      borderRadius: '4px',
+                      border: '1px solid #ffc107',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      fontSize: '10px',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#ffeaa7';
+                      e.currentTarget.style.transform = 'translateX(2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fff3cd';
+                      e.currentTarget.style.transform = 'translateX(0)';
+                    }}
+                  >
+                    <div style={{ fontWeight: '600', color: '#856404', marginBottom: '4px' }}>
+                      {client.name}
+                    </div>
+                    <div style={{ fontSize: '9px', color: '#666', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{client.overdue_count || 0} vėluojančios</span>
+                      <span style={{ fontWeight: '700', color: '#dc3545' }}>
+                        {formatCurrency(client.overdue_total || '0')}
+                      </span>
+                    </div>
+                    {client.oldest_overdue_date && (
+                      <div style={{ fontSize: '8px', color: '#999', marginTop: '2px' }}>
+                        Seniausia: {formatDate(client.oldest_overdue_date)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Vežėjai su vėluojančiomis */}
+          {carriersOverdue.length > 0 && (
+            <div style={{ 
+              backgroundColor: 'white', 
+              borderRadius: '6px', 
+              padding: '12px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+            }}>
+              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>🚚</span>
+                <span>VEŽĖJAI SU VĖLUOJANČIOMIS</span>
+                <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({carriersOverdue.length})</span>
+              </div>
+              <div style={{ display: 'grid', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
+                {carriersOverdue.slice(0, 10).map((carrier) => (
+                  <div
+                    key={carrier.id}
+                    onClick={() => navigate(`/partners/${carrier.id}`)}
+                    style={{
+                      padding: '8px',
+                      backgroundColor: '#fff3cd',
+                      borderRadius: '4px',
+                      border: '1px solid #ffc107',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      fontSize: '10px',
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = '#ffeaa7';
+                      e.currentTarget.style.transform = 'translateX(2px)';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = '#fff3cd';
+                      e.currentTarget.style.transform = 'translateX(0)';
+                    }}
+                  >
+                    <div style={{ fontWeight: '600', color: '#856404', marginBottom: '4px' }}>
+                      {carrier.name}
+                    </div>
+                    <div style={{ fontSize: '9px', color: '#666', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{carrier.overdue_count || 0} vėluojančios</span>
+                      <span style={{ fontWeight: '700', color: '#dc3545' }}>
+                        {formatCurrency(carrier.overdue_total || '0')}
+                      </span>
+                    </div>
+                    {carrier.oldest_overdue_date && (
+                      <div style={{ fontSize: '8px', color: '#999', marginTop: '2px' }}>
+                        Seniausia: {formatDate(carrier.oldest_overdue_date)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default DashboardPage;
