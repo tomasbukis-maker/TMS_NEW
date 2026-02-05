@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth.password_validation import validate_password
 from .models import User, Role, Permission
@@ -131,42 +132,37 @@ class PasswordChangeSerializer(serializers.Serializer):
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Papildytas JWT token serializer su papildoma informacija"""
-    
+    default_error_messages = {
+        "no_active_account": "Neteisingas vartotojo vardas arba slaptažodis. Patikrinkite ar paskyra aktyvi."
+    }
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)
         token['username'] = user.username
-        # Saugus role patikrinimas
         try:
             token['role'] = user.role.name if hasattr(user, 'role') and user.role else None
         except AttributeError:
             token['role'] = None
         token['user_id'] = user.id
         return token
-    
+
     def validate(self, attrs):
-        data = super().validate(attrs)
-        data['user'] = UserSerializer(self.user).data
-        return data
-
-
-class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Papildytas JWT token serializer su papildoma informacija"""
-    
-    @classmethod
-    def get_token(cls, user):
-        token = super().get_token(user)
-        token['username'] = user.username
-        # Saugus role patikrinimas
+        # Jei vartotojas egzistuoja bet is_active=False, o slaptažodis teisingas – aktyvinti (patogumui po DB sync)
+        username = attrs.get(self.username_field) or attrs.get("username")
+        password = attrs.get("password")
+        if username and password:
+            try:
+                u = User.objects.get(**{User.USERNAME_FIELD: username})
+                if not u.is_active and u.check_password(password):
+                    u.is_active = True
+                    u.save(update_fields=["is_active"])
+            except User.DoesNotExist:
+                pass
         try:
-            token['role'] = user.role.name if hasattr(user, 'role') and user.role else None
-        except AttributeError:
-            token['role'] = None
-        token['user_id'] = user.id
-        return token
-    
-    def validate(self, attrs):
-        data = super().validate(attrs)
-        data['user'] = UserSerializer(self.user).data
+            data = super().validate(attrs)
+        except AuthenticationFailed:
+            raise serializers.ValidationError({"detail": self.error_messages["no_active_account"]})
+        data["user"] = UserSerializer(self.user).data
         return data
 

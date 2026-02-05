@@ -43,8 +43,8 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken) {
         try {
-          // Bandom atnaujinti access token'ą
-          const response = await axios.post('/auth/token/refresh/', {
+          // Bandom atnaujinti access token'ą (naudojame api, kad kreipimasis eitų per /api ir proxy)
+          const response = await api.post('/auth/token/refresh/', {
             refresh: refreshToken
           });
 
