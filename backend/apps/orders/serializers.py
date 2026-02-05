@@ -1,5 +1,6 @@
 from rest_framework import serializers
 import logging
+from datetime import date
 from typing import Optional
 from .models import Order, OrderCarrier, OrderCost, City, VehicleType, OtherCostType, CargoItem, AutocompleteSuggestion, RouteContact, RouteStop
 from apps.partners.serializers import PartnerSerializer
@@ -249,7 +250,48 @@ class OrderCarrierSerializer(serializers.ModelSerializer):
             return getattr(obj, 'status_display', 'Naujas')
     
     def get_payment_status_info(self, obj):
-        """Safer way to get payment status info"""
+        """
+        Vežėjo apmokėjimo statusas iš TIKRŲ pirkimo sąskaitų (PurchaseInvoice), ne iš OrderCarrier.payment_status,
+        kad sąraše būtų rodoma teisinga būsena (žalia tik kai sąskaita tikrai apmokėta).
+        """
+        order = self.context.get('order') if self.context else None
+        if order and getattr(obj, 'partner_id', None):
+            invoices = []
+            if hasattr(order, 'purchase_invoices'):
+                for inv in order.purchase_invoices.all():
+                    if getattr(inv, 'partner_id', None) == obj.partner_id:
+                        invoices.append(inv)
+            if hasattr(order, 'purchase_invoices_m2m'):
+                for inv in order.purchase_invoices_m2m.all():
+                    if getattr(inv, 'partner_id', None) == obj.partner_id and inv.id not in (i.id for i in invoices):
+                        invoices.append(inv)
+            if invoices:
+                from django.utils import timezone
+                today = timezone.now().date()
+                paid_count = sum(1 for i in invoices if getattr(i, 'payment_status', None) == 'paid')
+                partially_count = sum(1 for i in invoices if getattr(i, 'payment_status', None) == 'partially_paid')
+                total = len(invoices)
+                if total > 0 and paid_count == total:
+                    paid_list = [i for i in invoices if getattr(i, 'payment_status', None) == 'paid']
+                    last_paid = max(paid_list, key=lambda i: (getattr(i, 'payment_date', None) or date.min, getattr(i, 'id', 0)), default=None) if paid_list else None
+                    payment_date_iso = last_paid.payment_date.isoformat() if last_paid and getattr(last_paid, 'payment_date', None) else None
+                    return {
+                        'status': 'paid',
+                        'message': 'Apmokėtas',
+                        'payment_date': payment_date_iso
+                    }
+                if paid_count > 0 or partially_count > 0:
+                    return {'status': 'partially_paid', 'message': 'Dalinai apmokėtas'}
+                overdue_invoices = [i for i in invoices if getattr(i, 'payment_status', None) in ('unpaid', 'overdue') and getattr(i, 'due_date', None) and i.due_date < today]
+                if overdue_invoices:
+                    max_overdue = min(overdue_invoices, key=lambda i: i.due_date)
+                    overdue_days = (today - max_overdue.due_date).days
+                    return {
+                        'status': 'overdue',
+                        'message': f'Vėluoja apmokėti ({overdue_days} d.)',
+                        'overdue_days': overdue_days
+                    }
+                return {'status': 'not_paid', 'message': 'Neapmokėtas'}
         try:
             return obj.payment_status_info
         except (AttributeError, Exception):
@@ -593,9 +635,72 @@ class OrderSerializer(serializers.ModelSerializer):
             return getattr(obj, 'order_type', '') or ''
 
     def get_payment_status_info(self, obj):
-        """Safer way to get payment status info"""
+        """Optimizuotas: skaičiuoja iš prefetched sales_invoices pagal TIKRĄ sąskaitų payment_status, ne order.client_payment_status."""
         try:
-            return obj.payment_status_info
+            if obj.pk is None:
+                return {
+                    'status': 'not_paid',
+                    'message': 'Nėra sąskaitų',
+                    'has_invoices': False,
+                    'invoice_issued': False
+                }
+            invoices = []
+            if hasattr(obj, 'sales_invoices'):
+                invoices.extend(obj.sales_invoices.all())
+            if hasattr(obj, 'order_sales_invoices'):
+                for link in obj.order_sales_invoices.all():
+                    inv = getattr(link, 'invoice', None)
+                    if inv and inv.id not in (i.id for i in invoices):
+                        invoices.append(inv)
+            client_invoice_issued = getattr(obj, 'client_invoice_issued', False)
+            if not invoices:
+                return {
+                    'status': 'not_paid',
+                    'message': 'Nėra sąskaitų',
+                    'has_invoices': False,
+                    'invoice_issued': client_invoice_issued
+                }
+            # Statusas iš TIKRŲ sąskaitų mokėjimo būsenų (kaip Order.payment_status_info modelyje)
+            count = len(invoices)
+            paid_count = sum(1 for i in invoices if getattr(i, 'payment_status', None) == 'paid')
+            partially_count = sum(1 for i in invoices if getattr(i, 'payment_status', None) == 'partially_paid')
+            from django.utils import timezone
+            today = timezone.now().date()
+            overdue_invoices = [i for i in invoices if getattr(i, 'payment_status', None) in ('unpaid', 'overdue') and getattr(i, 'due_date', None) and i.due_date < today]
+            if count > 0 and paid_count == count:
+                paid_list = [i for i in invoices if getattr(i, 'payment_status', None) == 'paid']
+                last_paid = max(paid_list, key=lambda i: (getattr(i, 'payment_date', None) or date.min, getattr(i, 'id', 0))) if paid_list else None
+                payment_date_iso = last_paid.payment_date.isoformat() if last_paid and getattr(last_paid, 'payment_date', None) else None
+                return {
+                    'status': 'paid',
+                    'message': 'Apmokėta',
+                    'has_invoices': True,
+                    'invoice_issued': client_invoice_issued,
+                    'payment_date': payment_date_iso
+                }
+            if paid_count > 0 or partially_count > 0:
+                return {
+                    'status': 'partially_paid',
+                    'message': 'Dalinai apmokėta',
+                    'has_invoices': True,
+                    'invoice_issued': client_invoice_issued
+                }
+            if overdue_invoices:
+                max_overdue = min(overdue_invoices, key=lambda i: i.due_date)
+                overdue_days = (today - max_overdue.due_date).days
+                return {
+                    'status': 'overdue',
+                    'message': f'Vėluoja apmokėti ({overdue_days} d.)',
+                    'has_invoices': True,
+                    'invoice_issued': client_invoice_issued,
+                    'overdue_days': overdue_days
+                }
+            return {
+                'status': 'not_paid',
+                'message': 'Neapmokėta',
+                'has_invoices': True,
+                'invoice_issued': client_invoice_issued
+            }
         except (AttributeError, Exception):
             return {
                 'status': 'not_paid',
@@ -614,6 +719,8 @@ class OrderSerializer(serializers.ModelSerializer):
     other_costs = serializers.JSONField(required=False, allow_null=True)
     other_costs_total = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     calculated_client_price_net = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    # Visų vežėjų kainų (be PVM) suma – naudoti sąraše vietoj vieno vežėjo kainos
+    carrier_price_net_total = serializers.SerializerMethodField()
     # carriers = OrderCarrierSerializer(many=True, read_only=True)  # Laikinai išjungta
     carriers = serializers.SerializerMethodField()
     cargo_items = serializers.SerializerMethodField()
@@ -632,6 +739,19 @@ class OrderSerializer(serializers.ModelSerializer):
             return []
         return RouteStopSerializer(obj.route_stops.all(), many=True).data
     
+    def get_carrier_price_net_total(self, obj):
+        """Visų užsakymo vežėjų kainų (be PVM) suma – rodoma sąraše stulpelyje „Vežėjo kaina (be PVM)“."""
+        try:
+            if obj.pk is None or not hasattr(obj, 'carriers'):
+                return None
+            total = sum(
+                (float(c.price_net) for c in obj.carriers.all() if c.price_net is not None),
+                0.0
+            )
+            return str(round(total, 2))
+        except (AttributeError, TypeError, ValueError):
+            return None
+
     def get_carriers(self, obj):
         """Optimizuotas: serializuoja visus carriers vienu kartu naudojant many=True"""
         try:
@@ -643,9 +763,9 @@ class OrderSerializer(serializers.ModelSerializer):
             carriers = obj.carriers.all()
             if not carriers:
                 return []
-            # Optimizacija: serializuoti visus carriers vienu kartu (many=True)
-            # Tai greičiau nei loop'as su kiekvienu serializer'iu
-            serializer = OrderCarrierSerializer(carriers, many=True, context=self.context)
+            # Perduoti order į kontekstą, kad OrderCarrierSerializer galėtų skaičiuoti payment_status_info iš PurchaseInvoice
+            context = {**(self.context or {}), 'order': obj}
+            serializer = OrderCarrierSerializer(carriers, many=True, context=context)
             return serializer.data
         except (AttributeError, Exception) as e:
             print(f"Error serializing carriers: {e}")
@@ -686,7 +806,7 @@ class OrderSerializer(serializers.ModelSerializer):
             'price_net', 'client_price_net', 'my_price_net', 'other_costs', 'vat_rate', 'vat_rate_article',
             'price_with_vat', 'vat_amount',
             'client_price_with_vat', 'client_vat_amount',
-            'transport_warehouse_cost', 'other_costs_total', 'calculated_client_price_net',
+            'transport_warehouse_cost', 'other_costs_total', 'calculated_client_price_net', 'carrier_price_net_total',
             'client_invoice_issued', 'client_invoice_received', 'client_payment_status', 'client_payment_status_display',
             'has_overdue_invoices', 'payment_status_info',
             'route_from', 'route_to', 'route_from_country', 'route_from_postal_code', 'route_from_city', 'route_from_address',
@@ -1001,46 +1121,43 @@ class OrderSerializer(serializers.ModelSerializer):
         return instance
     
     def get_first_sales_invoice(self, obj):
-        """Optimizuotas: visada tikrina DB tiesiogiai, kad būtų tikri duomenys (ypač po trinimo)"""
+        """Optimizuotas: naudoja prefetched sales_invoices ir order_sales_invoices, be papildomų DB užklausų."""
         try:
-            from apps.invoices.models import SalesInvoice, SalesInvoiceOrder
-            # VISADA tikrinti DB tiesiogiai, kad būtų tikri duomenys (ypač po trinimo)
-            invoice_ids = set()
-            # Tikrinti per ForeignKey
-            invoice_ids.update(SalesInvoice.objects.filter(related_order=obj).values_list('id', flat=True))
-            # Tikrinti per ManyToMany
-            invoice_ids.update(SalesInvoiceOrder.objects.filter(order=obj).values_list('invoice_id', flat=True))
-            
-            if not invoice_ids:
+            if obj.pk is None:
                 return None
-            
-            # Gauti pirmąją sąskaitą iš DB
-            sales_invoice = SalesInvoice.objects.filter(id__in=invoice_ids).order_by('created_at').first()
-            if sales_invoice:
-                return {
-                    'id': sales_invoice.id,
-                    'invoice_number': sales_invoice.invoice_number,
-                    'invoice_type': sales_invoice.invoice_type,
-                    'amount_total': str(sales_invoice.amount_total),
-                    'issue_date': sales_invoice.issue_date.strftime('%Y-%m-%d') if sales_invoice.issue_date else None,
-                    'due_date': sales_invoice.due_date.strftime('%Y-%m-%d') if sales_invoice.due_date else None,
-                }
+            invoices = []
+            if hasattr(obj, 'sales_invoices'):
+                invoices.extend(obj.sales_invoices.all())
+            if hasattr(obj, 'order_sales_invoices'):
+                for link in obj.order_sales_invoices.all():
+                    inv = getattr(link, 'invoice', None)
+                    if inv and inv.id not in (i.id for i in invoices):
+                        invoices.append(inv)
+            if not invoices:
+                return None
+            with_created = [(getattr(inv, 'created_at', None), inv) for inv in invoices]
+            with_created.sort(key=lambda x: (x[0] is None, x[0], x[1].id))
+            sales_invoice = with_created[0][1]
+            return {
+                'id': sales_invoice.id,
+                'invoice_number': sales_invoice.invoice_number,
+                'invoice_type': sales_invoice.invoice_type,
+                'amount_total': str(sales_invoice.amount_total),
+                'issue_date': sales_invoice.issue_date.strftime('%Y-%m-%d') if getattr(sales_invoice, 'issue_date', None) else None,
+                'due_date': sales_invoice.due_date.strftime('%Y-%m-%d') if getattr(sales_invoice, 'due_date', None) else None,
+            }
         except (AttributeError, Exception):
             pass
         return None
-    
+
     def get_sales_invoices_count(self, obj):
-        """Optimizuotas: naudoja prefetched sales_invoices, kad išvengtų N+1 query"""
+        """Optimizuotas: tik prefetched sales_invoices ir order_sales_invoices, be papildomų DB užklausų."""
         try:
-            from apps.invoices.models import SalesInvoice, SalesInvoiceOrder
             invoice_ids = set()
             if hasattr(obj, 'sales_invoices'):
                 invoice_ids.update(inv.id for inv in obj.sales_invoices.all())
             if hasattr(obj, 'order_sales_invoices'):
-                invoice_ids.update(link.invoice_id for link in obj.order_sales_invoices.all() if link.invoice_id)
-            if not invoice_ids:
-                invoice_ids.update(SalesInvoice.objects.filter(related_order=obj).values_list('id', flat=True))
-                invoice_ids.update(SalesInvoiceOrder.objects.filter(order=obj).values_list('invoice_id', flat=True))
+                invoice_ids.update(link.invoice_id for link in obj.order_sales_invoices.all() if getattr(link, 'invoice_id', None))
             return len(invoice_ids)
         except (AttributeError, Exception):
             return 0

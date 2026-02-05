@@ -33,6 +33,7 @@ rsync -az -e "$RSYNC_CMD" deploy_tms.sh "$SSH_USER@$SSH_HOST:/var/www/tms/backen
 
 echo -e "${BLUE}[STEP]${NC} Kopijuojami frontend failai..."
 rsync -az -e "$RSYNC_CMD" --exclude="node_modules" --exclude="build" ../frontend/src/ "$SSH_USER@$SSH_HOST:/var/www/tms/frontend/src/"
+rsync -az -e "$RSYNC_CMD" ../frontend/public/ "$SSH_USER@$SSH_HOST:/var/www/tms/frontend/public/"
 rsync -az -e "$RSYNC_CMD" ../frontend/package.json ../frontend/package-lock.json "$SSH_USER@$SSH_HOST:/var/www/tms/frontend/"
 
 echo -e "${BLUE}[STEP]${NC} Atnaujinamos dependencies serveryje..."

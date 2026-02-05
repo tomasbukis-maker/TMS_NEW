@@ -16,6 +16,7 @@ import ExpenseCategoriesPage from './pages/ExpenseCategoriesPage';
 import ExpenseInvoicesPage from './pages/ExpenseInvoicesPage';
 import MailPage from './pages/MailPage';
 import PaymentsPage from './pages/PaymentsPage';
+import AppsasPage from './pages/AppsasPage';
 import Navigation from './components/Navigation';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ModuleProvider } from './context/ModuleContext';
@@ -63,6 +64,14 @@ function App() {
             element={
               <PrivateRoute>
                 <MailPage />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/appsas"
+            element={
+              <PrivateRoute>
+                <AppsasPage />
               </PrivateRoute>
             }
           />

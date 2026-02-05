@@ -11,8 +11,7 @@ import PartnerEditModal from '../partners/PartnerEditModal';
 import OrderEdit_Finance from './OrderEdit_Finance';
 import SalesInvoiceModal_NEW from '../invoices/SalesInvoiceModal_NEW';
 import PurchaseInvoiceModal_NEW from '../invoices/PurchaseInvoiceModal_NEW';
-// TODO: Senas modalas - bus ištrintas
-// import PurchaseInvoiceEditModal from '../invoices/PurchaseInvoiceEditModal_OLD';
+import { formatMoney } from '../../utils/formatMoney';
 import HTMLPreviewModal, { HTMLPreview } from '../common/HTMLPreviewModal';
 import AttachmentPreviewModal, { AttachmentPreview } from '../common/AttachmentPreviewModal';
 
@@ -215,6 +214,9 @@ interface Client {
   email_notify_due_soon?: boolean;
   email_notify_unpaid?: boolean;
   email_notify_overdue?: boolean;
+  code_valid?: boolean;
+  vat_code_valid?: boolean;
+  has_code_errors?: boolean;
   notes?: string;
 }
 
@@ -228,7 +230,8 @@ interface User {
 
 interface OtherCost {
   description: string;
-  amount: number;
+  amount: number | string;
+  visible_on_invoice?: boolean;
 }
 
 interface PVMRate {
@@ -499,6 +502,10 @@ const RouteStopModal: React.FC<{
         date_to: formattedDateTo
       });
     } else {
+      // Naujas sustojimas: numatyti data ir laikas 00:00, kad datetime-local nerodytų "--:--"
+      const today = new Date();
+      const dateStr = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+      const defaultDateTime = dateStr + 'T00:00';
       setFormData({
         stop_type: stopType,
         sequence_order: 0,
@@ -507,8 +514,8 @@ const RouteStopModal: React.FC<{
         postal_code: '',
         city: '',
         address: '',
-        date_from: '',
-        date_to: '',
+        date_from: defaultDateTime,
+        date_to: defaultDateTime,
         notes: ''
       });
     }
@@ -862,6 +869,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
   }>({});
   const [cargoItems, setCargoItems] = useState<CargoItem[]>([]);
   const [routeStops, setRouteStops] = useState<RouteStop[]>([]);
+  const [routeNotRequired, setRouteNotRequired] = useState<boolean>(false);
   const [pvmRates, setPvmRates] = useState<PVMRate[]>([]);
   const [allManagers, setAllManagers] = useState<User[]>([]);
   const [editingOtherCost, setEditingOtherCost] = useState<{ description: string; amount: string } | null>(null);
@@ -990,7 +998,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
       return;
     }
     try {
-      const response = await api.get('/partners/partners/', { params: { search: query, page_size: 10 } });
+      const response = await api.get('/partners/partners/', { params: { search: query, page_size: 10, include_code_errors: 1 } });
       const clientsData = response.data.results || response.data || [];
       setClients(Array.isArray(clientsData) ? clientsData : []);
     } catch (error) {
@@ -1369,7 +1377,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
     setEditingStopIndex(null);
   }, [routeStops, editingStopIndex]);
 
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback((suggestedOrderNumber?: string) => {
     myPriceManuallyEdited.current = false;
     setSelectedClient(null);
     setClientSearch('');
@@ -1379,7 +1387,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
       client_id: '',
       carrier_id: '',
       order_type: '',
-      order_number: '',
+      order_number: suggestedOrderNumber ?? '',
       client_order_number: '',
       manager_id: user?.id ? user.id.toString() : '',
       status: 'new',
@@ -1432,6 +1440,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
     setOrderCarriers([]);
     setCargoItems([]);
     setRouteStops([]);
+    setRouteNotRequired(false);
     setEmailNotifyDueSoon(false);
     setEmailNotifyUnpaid(false);
     setEmailNotifyOverdue(false);
@@ -1449,9 +1458,13 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
         manager_id: (order.manager_id || order.manager?.id)?.toString() || '',
         status: order.status,
         price_net: order.price_net ? String(order.price_net) : '',
-        client_price_net: order.client_price_net || '',
-        my_price_net: order.my_price_net ? String(order.my_price_net) : '',
-        other_costs: order.other_costs || [],
+        client_price_net: order.client_price_net != null && order.client_price_net !== '' ? parseFloat(String(order.client_price_net)).toFixed(2) : '',
+        my_price_net: order.my_price_net != null && order.my_price_net !== '' ? parseFloat(String(order.my_price_net)).toFixed(2) : '',
+        other_costs: (order.other_costs || []).map((c: any) => ({
+          description: c.description ?? '',
+          amount: c.amount ?? '',
+          visible_on_invoice: c.visible_on_invoice !== false,
+        })),
         vat_rate: order.vat_rate,
         vat_rate_article: order.vat_rate_article || '',
         client_invoice_issued: order.client_invoice_issued,
@@ -1574,6 +1587,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
       }
 
       const stops = [...(order.route_stops || [])].sort((a, b) => (a.sequence_order || 0) - (b.sequence_order || 0));
+      let stopsToSet: RouteStop[];
       if (stops.length === 0 && (order.route_from_city || order.route_to_city)) {
         const initialStops: RouteStop[] = [];
         if (order.route_from_city || order.sender_route_from) {
@@ -1604,11 +1618,24 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
             notes: ''
           });
         }
-        setRouteStops(initialStops);
+        stopsToSet = initialStops;
       } else {
-        setRouteStops(stops);
+        stopsToSet = stops;
       }
-    } else if (isOpen) resetForm();
+      setRouteStops(stopsToSet);
+      setRouteNotRequired(stopsToSet.length === 0);
+    } else if (isOpen) {
+      // Naujas užsakymas: gauti siūlomą numerį (pirmas tarpas arba kitas) ir užpildyti formą
+      (async () => {
+        try {
+          const res = await api.get<{ suggested_order_number?: string }>('/orders/orders/suggested_order_number/');
+          const suggested = (res.data?.suggested_order_number || '').trim();
+          resetForm(suggested || undefined);
+        } catch {
+          resetForm();
+        }
+      })();
+    }
   }, [isOpen, order, isEditMode, resetForm]);
 
   useEffect(() => {
@@ -1729,19 +1756,20 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
     const firstLoading = routeStops.find(s => s.stop_type === 'loading');
     const lastUnloading = [...routeStops].reverse().find(s => s.stop_type === 'unloading');
 
-    if (!firstLoading || !lastUnloading) {
-      return showToast('info', 'Pridėkite bent vieną pakrovimo ir vieną iškrovimo tašką „Maršrutas“ skiltyje');
-    }
-
-    if (!firstLoading.country || !lastUnloading.country) {
-      return showToast('info', 'Užpildykite šalių laukus sustojimuose (pakrovimo ir iškrovimo taškuose)');
+    if (!routeNotRequired) {
+      if (!firstLoading || !lastUnloading) {
+        return showToast('info', 'Pridėkite bent vieną pakrovimo ir vieną iškrovimo tašką „Maršrutas“ skiltyje arba pažymėkite „Nereikalauti maršruto“');
+      }
+      if (!firstLoading.country || !lastUnloading.country) {
+        return showToast('info', 'Užpildykite šalių laukus sustojimuose (pakrovimo ir iškrovimo taškuose)');
+      }
     }
 
     // Validacijos pranešimai (neblokuojantys)
     const warnings: string[] = [];
     
-    // Patikrinti datas
-    if (firstLoading.date_from && lastUnloading.date_to) {
+    // Patikrinti datas (tik jei yra pakrovimo ir iškrovimo taškai)
+    if (firstLoading && lastUnloading && firstLoading.date_from && lastUnloading.date_to) {
       const loadingDate = new Date(firstLoading.date_from);
       const unloadingDate = new Date(lastUnloading.date_to);
       if (loadingDate > unloadingDate) {
@@ -1848,6 +1876,14 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
     };
 
     try {
+      // Maršruto laukus užpildyti iš routeStops (pirmas pakrovimas / paskutinis iškrovimas), kad sąraše būtų rodomas maršrutas
+      const firstLoadingStop = routeStops.find(s => s.stop_type === 'loading');
+      const lastUnloadingStop = [...routeStops].reverse().find(s => s.stop_type === 'unloading');
+      const routeFromParts = firstLoadingStop ? [firstLoadingStop.country, firstLoadingStop.postal_code, firstLoadingStop.city, firstLoadingStop.address].filter(Boolean).filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+      const routeToParts = lastUnloadingStop ? [lastUnloadingStop.country, lastUnloadingStop.postal_code, lastUnloadingStop.city, lastUnloadingStop.address].filter(Boolean).filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+      const route_from = firstLoadingStop ? (routeFromParts.join(', ') || (firstLoadingStop.city && firstLoadingStop.country ? `${firstLoadingStop.city}, ${firstLoadingStop.country}` : '')) : (formData.route_from || '');
+      const route_to = lastUnloadingStop ? (routeToParts.join(', ') || (lastUnloadingStop.city && lastUnloadingStop.country ? `${lastUnloadingStop.city}, ${lastUnloadingStop.country}` : '')) : (formData.route_to || '');
+
       const dataToSend = {
         client_id: parseInt(formData.client_id),
         manager_id: formData.manager_id ? parseInt(formData.manager_id) : null,
@@ -1856,13 +1892,31 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
         vat_rate: formData.vat_rate || '21',
 
         // Kiti esminiai laukai
-        route_from: formData.route_from || '',
-        route_to: formData.route_to || '',
+        order_type: (formData.order_type || '').trim() || '',
+        order_number: (formData.order_number || '').trim() || null,
+        client_order_number: formData.client_order_number ?? '',
+        order_date: formData.order_date ? (formData.order_date.includes('T') ? formData.order_date : `${formData.order_date}T00:00`) : null,
+        route_from,
+        route_to,
+        route_from_country: firstLoadingStop?.country ?? formData.route_from_country ?? '',
+        route_from_postal_code: firstLoadingStop?.postal_code ?? formData.route_from_postal_code ?? '',
+        route_from_city: firstLoadingStop?.city ?? formData.route_from_city ?? '',
+        route_from_address: firstLoadingStop?.address ?? formData.route_from_address ?? '',
+        route_to_country: lastUnloadingStop?.country ?? formData.route_to_country ?? '',
+        route_to_postal_code: lastUnloadingStop?.postal_code ?? formData.route_to_postal_code ?? '',
+        route_to_city: lastUnloadingStop?.city ?? formData.route_to_city ?? '',
+        route_to_address: lastUnloadingStop?.address ?? formData.route_to_address ?? '',
+        sender_route_from: firstLoadingStop?.name ?? formData.sender_route_from ?? '',
+        receiver_route_to: lastUnloadingStop?.name ?? formData.receiver_route_to ?? '',
         notes: formData.notes || '',
         vehicle_type: formData.vehicle_type || '',
         client_invoice_issued: formData.client_invoice_issued || false,
         client_invoice_received: formData.client_invoice_received || false,
-        other_costs: formData.other_costs || [],
+        other_costs: (formData.other_costs || []).map((c: OtherCost) => ({
+          description: String(c.description || '').trim() || 'Kitos išlaidos',
+          amount: typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0,
+          visible_on_invoice: c.visible_on_invoice !== false,
+        })),
       };
 
       console.log('📤 Siunčiama API užklausa:', isEditMode ? 'PUT' : 'POST');
@@ -2186,7 +2240,14 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                           <button type="button" className="btn-add-inline" onClick={() => setShowPartnerModal(true)}>➕</button>
                           {clients.length > 0 && (
                             <div className="dropdown-menu-list">
-                              {clients.map(c => <div key={c.id} className="dropdown-item" onClick={() => handleClientSelect(c)}>{c.name}</div>)}
+                              {clients.map(c => (
+                                <div key={c.id} className="dropdown-item" onClick={() => handleClientSelect(c)}>
+                                  {c.name}
+                                  {(c.has_code_errors || c.code_valid === false || c.vat_code_valid === false) && (
+                                    <span style={{ fontSize: '10px', color: '#c0392b', fontWeight: 600, marginLeft: '4px' }} title="Trūksta rekvizitų (įm. arba PVM kodas neteisingas)">(Trūksta duomenų)</span>
+                                  )}
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -2222,7 +2283,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                                 </span>
                                 <span style={{ color: '#666', fontSize: '9px' }}>|</span>
                                 <span style={{ color: clientUnpaidInvoices.max_overdue_days > 0 ? '#856404' : (clientUnpaidInvoices.count > 0 ? '#004085' : '#6c757d') }}>
-                                  💰 <strong>{parseFloat(clientUnpaidInvoices.total_amount).toFixed(2)} EUR</strong> bendra suma
+                                  💰 <strong>{formatMoney(clientUnpaidInvoices.total_amount)}</strong> bendra suma
                                 </span>
                                 {clientUnpaidInvoices.max_overdue_days > 0 && (
                                   <>
@@ -2374,7 +2435,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                           Užsakymo numeris
                           {!isEditMode && (
                             <span style={{ fontSize: '9px', color: '#666', fontWeight: 'normal', marginLeft: '4px' }}>
-                              (palikite tuščią - bus sugeneruotas automatiškai)
+                              (siūlomas numeris – galite pakeisti arba palikti tuščią)
                             </span>
                           )}
                         </label>
@@ -2384,8 +2445,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                           onChange={e => setFormData({...formData, order_number: e.target.value})} 
                           className="form-control" 
                           style={{ padding: '6px 8px', fontSize: '12px' }}
-                          placeholder={isEditMode ? "PVZ: 2026-001" : "Palikite tuščią - bus sugeneruotas automatiškai"}
-                          disabled={isEditMode && !!formData.order_number}
+                          placeholder={isEditMode ? "PVZ: 2026-001" : "Siūlomas numeris – galite pakeisti"}
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: '8px' }}>
@@ -2397,6 +2457,16 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                           className="form-control" 
                           style={{ padding: '6px 8px', fontSize: '12px' }}
                           placeholder="PVZ: PO-12345"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: '8px' }}>
+                        <label style={{ fontSize: '11px', marginBottom: '3px' }}>Užsakymo data</label>
+                        <input
+                          type="date"
+                          value={formData.order_date ? formData.order_date.split('T')[0] : ''}
+                          onChange={e => setFormData({ ...formData, order_date: e.target.value ? `${e.target.value}T00:00` : '' })}
+                          className="form-control"
+                          style={{ padding: '6px 8px', fontSize: '12px' }}
                         />
                       </div>
                       <div className="form-group" style={{ marginBottom: '8px' }}>
@@ -2492,6 +2562,15 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
             {/* TAB: ROUTE */}
             {activeTab === 'route' && (
               <div className="card-section">
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '15px', cursor: 'pointer', fontSize: '14px' }}>
+                  <input
+                    type="checkbox"
+                    checked={routeNotRequired}
+                    onChange={(e) => setRouteNotRequired(e.target.checked)}
+                    style={{ width: '18px', height: '18px' }}
+                  />
+                  <span>Nereikalauti maršruto</span>
+                </label>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}>
                   <h4 className="section-title" style={{ marginBottom: 0 }}>Maršruto sustojimai (Pakrovimai / Iškrovimai)</h4>
                   <div style={{ display: 'flex', gap: '10px' }}>
@@ -2677,7 +2756,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                                 </span>
                                 <span style={{ color: '#666', fontSize: '9px' }}>|</span>
                                 <span style={{ color: unpaidInfo.max_overdue_days > 0 ? '#856404' : (unpaidInfo.count > 0 ? '#004085' : '#6c757d') }}>
-                                  💰 <strong>{parseFloat(unpaidInfo.total_amount).toFixed(2)} EUR</strong> bendra suma
+                                  💰 <strong>{formatMoney(unpaidInfo.total_amount)}</strong> bendra suma
                                 </span>
                                 {unpaidInfo.max_overdue_days > 0 && (
                                   <>
@@ -2690,7 +2769,7 @@ const OrderEditModal_NEW: React.FC<OrderEditModalProps> = ({
                               </div>
                             )}
                           </div>
-                          <div>Kaina: {c.price_net} EUR | Maršrutas: {c.route_from} → {c.route_to}</div>
+                          <div>Kaina: {formatMoney(c.price_net)} | Maršrutas: {c.route_from} → {c.route_to}</div>
                         </div>
                         <div className="carrier-actions">
                           <button 

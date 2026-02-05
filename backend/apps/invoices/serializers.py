@@ -39,6 +39,8 @@ class SalesInvoiceListSerializer(serializers.ModelSerializer):
     """Supaprastintas serializer sąskaitų sąrašui"""
     invoice_type_display = serializers.CharField(source='get_invoice_type_display', read_only=True)
     payment_status_display = serializers.CharField(source='get_payment_status_display', read_only=True)
+    paid_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    remaining_amount = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
     
     class Meta:
         model = SalesInvoice
@@ -47,13 +49,27 @@ class SalesInvoiceListSerializer(serializers.ModelSerializer):
             'partner', 'related_order', 'related_order_id', 'credit_invoice',
             'payment_status', 'payment_status_display',
             'amount_net', 'vat_rate', 'vat_rate_article', 'amount_total',
+            'paid_amount', 'remaining_amount',
             'issue_date', 'due_date', 'payment_date', 'related_orders',
             'overdue_days', 'created_at'
         ]
-        read_only_fields = ['id', 'amount_total', 'overdue_days', 'created_at', 'related_order_id']
+        read_only_fields = ['id', 'amount_total', 'paid_amount', 'remaining_amount', 'overdue_days', 'created_at', 'related_order_id']
     
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        # Kai susieta keli užsakymai – rodyti visų susietų užsakymų sumų sumą
+        try:
+            effective_total = instance.effective_amount_total
+            data['amount_net'] = str(instance.effective_amount_net)
+            data['amount_total'] = str(effective_total)
+            data['remaining_amount'] = str(effective_total - instance.paid_amount)
+        except (AttributeError, Exception):
+            pass
+        # Užtikrinti, kad vat_rate būtų skaičius (sąraše rodyti „be PVM“ / „su PVM“)
+        try:
+            data['vat_rate'] = str(instance.vat_rate) if instance.vat_rate is not None else '0'
+        except (AttributeError, Exception):
+            data['vat_rate'] = '0'
         try:
             data['partner'] = {
                 'id': instance.partner.id,
@@ -73,7 +89,9 @@ class SalesInvoiceListSerializer(serializers.ModelSerializer):
                 data['related_order'] = None
         except (AttributeError, Exception):
             data['related_order'] = None
-        
+        # Apmokėjimo datą rodyti tik kai sąskaita apmokėta – kad Partnerių puslapyje neapmokėtos nerodytų klaidingos datos
+        if getattr(instance, 'payment_status', None) != 'paid':
+            data['payment_date'] = None
         return data
 
 
@@ -113,6 +131,17 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             'invoice_number': {'required': False, 'allow_blank': True}
         }
 
+    def to_representation(self, instance):
+        """Kai susieta keli užsakymai – amount_net/amount_total = visų susietų užsakymų sumų suma."""
+        data = super().to_representation(instance)
+        try:
+            data['amount_net'] = str(instance.effective_amount_net)
+            data['amount_total'] = str(instance.effective_amount_total)
+            data['remaining_amount'] = str(instance.effective_amount_total - instance.paid_amount)
+        except (AttributeError, Exception):
+            pass
+        return data
+
     def get_payment_history(self, obj):
         """Grąžina mokėjimų istoriją"""
         payments = obj.payment_history.all().order_by('-payment_date', '-created_at')
@@ -143,21 +172,62 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         except Exception:
             return []
 
+    def _order_route_description(self, order):
+        """Sudaro maršruto aprašymą iš užsakymo (route_stops arba route_from/route_to). Jei maršruto nėra – grąžina bendrą pavadinimą."""
+        route_parts = []
+        stops = list(order.route_stops.all().order_by('sequence_order'))
+        if stops:
+            for s in stops:
+                stop_label = '🛫' if s.stop_type == 'loading' else '🛬'
+                loc = (s.city or s.country or '').strip() or '?'
+                d_info = f" ({s.date_from.strftime('%Y.%m.%d')})" if getattr(s, 'date_from', None) else ""
+                route_parts.append(f"{stop_label} {loc}{d_info}")
+        else:
+            f_city = (order.route_from_city or "").strip()
+            f_country = (order.route_from_country or "").strip()
+            f_loc = ", ".join(filter(None, [f_city, f_country])).strip() or (order.route_from or "").strip()
+            t_city = (order.route_to_city or "").strip()
+            t_country = (order.route_to_country or "").strip()
+            t_loc = ", ".join(filter(None, [t_city, t_country])).strip() or (order.route_to or "").strip()
+            if f_loc:
+                route_parts.append(f"🛫 {f_loc}")
+            if t_loc:
+                route_parts.append(f"🛬 {t_loc}")
+        if route_parts:
+            return "Maršrutas: " + " → ".join(route_parts)
+        return "Prekės ir paslaugos"
+
     def get_invoice_items(self, obj):
-        """Grąžina sąskaitos eilutes"""
+        """Grąžina sąskaitos eilutes. PVM tarifas imamas iš užsakymo (order.vat_rate), jei jis nustatytas – kad 0% PVM užsakymai nerodytų PVM."""
         invoice_items = []
         display_options = obj.display_options or {}
         
+        # Pirmiausia iš invoice_orders (M2M) – keli užsakymai vienoje sąskaitoje
         try:
-            if obj.related_order:
+            if hasattr(obj, 'invoice_orders') and obj.invoice_orders.exists():
+                for link in obj.invoice_orders.select_related('order').all():
+                    order = link.order
+                    amount_net = float(link.amount) if link.amount is not None else 0.0
+                    vat_rate = float(order.vat_rate) if order.vat_rate is not None else (float(obj.vat_rate) if obj.vat_rate else 0.0)
+                    vat_amount = amount_net * vat_rate / 100.0
+                    invoice_items.append({
+                        'description': self._order_route_description(order),
+                        'amount_net': amount_net,
+                        'vat_amount': vat_amount,
+                        'amount_total': amount_net + vat_amount,
+                        'vat_rate': vat_rate
+                    })
+            elif obj.related_order:
                 order = obj.related_order
-                vat_rate = float(obj.vat_rate) if obj.vat_rate else 0.0
-                
+                amount_net = float(obj.amount_net) if obj.amount_net is not None else 0.0
+                vat_rate = float(order.vat_rate) if order.vat_rate is not None else (float(obj.vat_rate) if obj.vat_rate else 0.0)
+                vat_amount = amount_net * vat_rate / 100.0
+                description = self._order_route_description(order)
                 invoice_items.append({
-                    'description': f"Maršrutas: {order.route_from or 'Nenurodytas'} - {order.route_to or 'Nenurodytas'}",
-                    'amount_net': float(obj.amount_net),
-                    'vat_amount': float(obj.amount_net) * vat_rate / 100.0,
-                    'amount_total': float(obj.amount_total),
+                    'description': description,
+                    'amount_net': amount_net,
+                    'vat_amount': vat_amount,
+                    'amount_total': amount_net + vat_amount,
                     'vat_rate': vat_rate
                 })
         except Exception:
@@ -219,6 +289,18 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         if related_order_id is not None:
             validated_data['related_order_id'] = related_order_id
         
+        # Kai keičiamas vat_rate arba amount_net – perskaičiuoti amount_total
+        amount_net = validated_data.get('amount_net')
+        vat_rate = validated_data.get('vat_rate')
+        if amount_net is not None or vat_rate is not None:
+            net = Decimal(str(amount_net)) if amount_net is not None else (instance.amount_net or Decimal('0'))
+            rate = Decimal(str(vat_rate)) if vat_rate is not None else (instance.vat_rate or Decimal('0'))
+            if isinstance(net, str):
+                net = Decimal(net)
+            if isinstance(rate, str):
+                rate = Decimal(rate)
+            validated_data['amount_total'] = net * (Decimal('1.00') + rate / Decimal('100.00'))
+        
         return super().update(instance, validated_data)
 
 
@@ -237,16 +319,22 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     payment_history = serializers.SerializerMethodField(read_only=True)
     invoice_file_url = serializers.SerializerMethodField()
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if getattr(instance, 'payment_status', None) != 'paid':
+            data['payment_date'] = None
+        return data
+
     def create(self, validated_data):
         related_order_ids = validated_data.pop('related_order_ids', [])
         related_orders_amounts = validated_data.pop('related_orders_amounts', [])
-        expense_category_id = validated_data.get('expense_category_id')
+        expense_category_id = validated_data.pop('expense_category_id', None)
         
-        if expense_category_id:
+        if expense_category_id and str(expense_category_id).strip():
             try:
-                category = ExpenseCategory.objects.get(id=expense_category_id)
+                category = ExpenseCategory.objects.get(id=int(expense_category_id))
                 validated_data['expense_category'] = category
-            except ExpenseCategory.DoesNotExist:
+            except (ExpenseCategory.DoesNotExist, ValueError, TypeError):
                 pass
         
         amount_net = validated_data.get('amount_net')
@@ -271,17 +359,42 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         related_order_ids = validated_data.pop('related_order_ids', None)
         related_orders_amounts = validated_data.pop('related_orders_amounts', None)
-        validated_data.pop('payment_status', None)
+        # payment_status leidžiame atnaujinti per PATCH (redagavime)
         
         if 'payment_date' in validated_data:
             payment_date_val = validated_data['payment_date']
             if payment_date_val == '' or payment_date_val is None:
                 validated_data['payment_date'] = None
         
+        # Kai keičiamas amount_net arba vat_rate – perskaičiuoti amount_total (jis read_only, todėl reikia įrašyti rankiniu būdu)
+        amount_net = validated_data.get('amount_net')
+        vat_rate = validated_data.get('vat_rate')
+        if amount_net is not None or vat_rate is not None:
+            net = amount_net if amount_net is not None else instance.amount_net
+            rate = vat_rate if vat_rate is not None else instance.vat_rate
+            if net is not None and rate is not None:
+                net = Decimal(str(net)) if not isinstance(net, Decimal) else net
+                rate = Decimal(str(rate)) if not isinstance(rate, Decimal) else rate
+                validated_data['amount_total'] = net * (Decimal('1.00') + rate / Decimal('100.00'))
+        
         invoice = super().update(instance, validated_data)
         
         if related_order_ids is not None:
             invoice.related_orders.set(related_order_ids)
+            # Atnaujinti ir seną related_order (FK), kad užsakymo Finansai skiltyje
+            # nerodytų šios sąskaitos užsakymams, kurie buvo pašalinti iš related_orders
+            first_id = None
+            if related_order_ids:
+                first_id = related_order_ids[0]
+                if first_id is not None and not isinstance(first_id, int):
+                    first_id = int(first_id)
+            if invoice.related_order_id != first_id:
+                invoice.related_order_id = first_id
+                invoice.save(update_fields=['related_order_id'])
+            # Kai atjungiame visus užsakymus, išvalyti ir related_orders_amounts, kad nebeliktų „dalinio apmokėjimo“ pėdsakų
+            if not related_order_ids:
+                invoice.related_orders_amounts = []
+                invoice.save(update_fields=['related_orders_amounts'])
         if related_orders_amounts is not None:
             invoice.related_orders_amounts = related_orders_amounts
             invoice.save(update_fields=['related_orders_amounts'])

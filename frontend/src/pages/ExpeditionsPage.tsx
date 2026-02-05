@@ -7,6 +7,7 @@ import AttachmentPreviewModal, { AttachmentPreview } from '../components/common/
 import CarrierModal from '../components/orders/CarrierModal';
 import { Expedition } from '../types/expedition';
 import { useUISettings } from '../hooks/useUISettings';
+import { formatMoney } from '../utils/formatMoney';
 import './ExpeditionsPage.css';
 
 interface MailAttachment {
@@ -59,14 +60,10 @@ const formatDateTime = (value?: string | null, withTime = true): string => {
 };
 
 const formatCurrency = (value: string | number | null | undefined): string => {
-  if (value === null || value === undefined || value === '') {
-    return '—';
-  }
+  if (value === null || value === undefined || value === '') return '—';
   const numeric = typeof value === 'number' ? value : parseFloat(String(value));
-  if (Number.isNaN(numeric)) {
-    return '—';
-  }
-  return `${numeric.toFixed(2)} €`;
+  if (Number.isNaN(numeric)) return '—';
+  return formatMoney(numeric);
 };
 
 const ExpeditionsPage: React.FC = () => {
@@ -1188,7 +1185,7 @@ const ExpeditionsPage: React.FC = () => {
                             {MAIL_MATCH_ICON}
                           </button>
                         )}
-                        {(expedition.documents || []).some((doc) => doc.document_type === 'invoice') ? (
+                        {((expedition.documents || []).some((doc) => doc.document_type === 'invoice') || expedition.invoice_received === true) ? (
                           <span className="invoice-indicator invoice-indicator-success">Sąskaita gauta</span>
                         ) : (
                           <span className="invoice-indicator invoice-indicator-muted">Sąskaitos nėra</span>

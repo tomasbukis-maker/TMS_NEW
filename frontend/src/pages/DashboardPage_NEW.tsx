@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useModule } from '../context/ModuleContext';
+import { formatMoney } from '../utils/formatMoney';
 import ExpenseDashboardPage from './ExpenseDashboardPage';
 import './DashboardPage_NEW.css';
 
@@ -10,12 +11,25 @@ interface DashboardStats {
   invoices: {
     unpaid_sales: { count: number; total: string; oldest_invoices?: any[] };
     paid_sales: { count: number; total: string };
+    partially_paid_sales: { count: number; total: string; oldest_invoices?: any[] };
     unpaid_purchase: { count: number; total: string; oldest_invoices?: any[] };
     paid_purchase: { count: number; total: string };
+    partially_paid_purchase: { count: number; total: string; oldest_invoices?: any[] };
     overdue_sales: { count: number; oldest_invoices?: any[] };
     overdue_purchase: { count: number; oldest_invoices?: any[] };
   };
-  orders: { finished: number; unfinished: number; new: number };
+  orders: {
+    total?: number;
+    new: number;
+    assigned?: number;
+    executing?: number;
+    waiting_for_docs?: number;
+    waiting_for_payment?: number;
+    finished: number;
+    closed?: number;
+    canceled?: number;
+    unfinished: number;
+  };
   clients: { new_this_month: number };
   finance?: {
     monthly_profit: string;
@@ -31,6 +45,10 @@ interface DashboardStats {
     without_carriers: number;
     finished_without_invoices: number;
     with_overdue_invoices: number;
+    without_cargo: number;
+    without_route: number;
+    without_client_price: number;
+    without_carrier_price: number;
     upcoming: any[];
   };
   carriers_tracking?: {
@@ -40,7 +58,7 @@ interface DashboardStats {
   alerts?: any[];
 }
 
-type PeriodType = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'all' | 'custom';
+type PeriodType = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'last7' | 'last14' | 'last30' | 'last_month' | 'last_quarter' | 'last_year' | 'all' | 'custom';
 type FilterBy = 'issue_date' | 'due_date' | 'payment_date' | 'created_at' | 'order_date' | 'loading_date' | 'unloading_date';
 
 const DashboardPage_NEW: React.FC = () => {
@@ -58,15 +76,7 @@ const DashboardPage_NEW: React.FC = () => {
   const [compareWithPrevious, setCompareWithPrevious] = useState<boolean>(false);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
 
-  const formatCurrency = useCallback((amount: string | number) => {
-    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-    if (isNaN(num)) return '0.00 €';
-    return new Intl.NumberFormat('lt-LT', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-    }).format(num);
-  }, []);
+  const formatCurrency = useCallback((amount: string | number) => formatMoney(amount), []);
 
   const formatDate = useCallback((dateStr: string) => {
     if (!dateStr) return '-';
@@ -113,6 +123,42 @@ const DashboardPage_NEW: React.FC = () => {
           to: today.toISOString().split('T')[0],
         };
       }
+      case 'last7': {
+        const from = new Date(today);
+        from.setDate(today.getDate() - 6);
+        return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last14': {
+        const from = new Date(today);
+        from.setDate(today.getDate() - 13);
+        return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last30': {
+        const from = new Date(today);
+        from.setDate(today.getDate() - 29);
+        return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last_month': {
+        const y = today.getFullYear(), m = today.getMonth();
+        const first = new Date(y, m - 1, 1);
+        const last = new Date(y, m, 0);
+        return { from: first.toISOString().split('T')[0], to: last.toISOString().split('T')[0] };
+      }
+      case 'last_quarter': {
+        const q = Math.floor(today.getMonth() / 3);
+        const startM = q === 0 ? 9 : (q - 1) * 3;
+        const startY = q === 0 ? today.getFullYear() - 1 : today.getFullYear();
+        const first = new Date(startY, startM, 1);
+        const last = new Date(startY, startM + 3, 0);
+        return { from: first.toISOString().split('T')[0], to: last.toISOString().split('T')[0] };
+      }
+      case 'last_year': {
+        const y = today.getFullYear() - 1;
+        return {
+          from: `${y}-01-01`,
+          to: `${y}-12-31`,
+        };
+      }
       case 'custom':
         return {
           from: customDateFrom || null,
@@ -133,11 +179,15 @@ const DashboardPage_NEW: React.FC = () => {
         filter_by: filterBy,
       };
 
-      // Backend palaiko tik 'all' arba 'month'
+      // Backend palaiko 'all' arba tikslius rėžius (date_from/date_to) arba mėnesį (year/month)
       if (periodType === 'all') {
         params.period_type = 'all';
+      } else if (dateRange.from && dateRange.to) {
+        // Tikslius rėžiai: šiandien, savaitė, mėnuo, ketvirtis, metai, custom – užsakymų kiekis ir kt. atitinka pasirinktą periodą
+        params.period_type = 'month';
+        params.date_from = dateRange.from;
+        params.date_to = dateRange.to;
       } else {
-        // Visi kiti periodai naudoja 'month' su year ir month parametrais
         const fromDate = new Date(dateRange.from || new Date());
         params.period_type = 'month';
         params.year = fromDate.getFullYear();
@@ -149,27 +199,7 @@ const DashboardPage_NEW: React.FC = () => {
         api.get('/dashboard/clients-overdue/'),
         api.get('/dashboard/carriers-overdue/')
       ]);
-      
-      // Debug: patikrinti, ką grąžina backend
-      console.log('Dashboard API Response:', {
-        params,
-        orders_tracking: statsRes.data?.orders_tracking,
-        carriers_tracking: statsRes.data?.carriers_tracking,
-        orders: statsRes.data?.orders
-      });
-      console.log('Orders Tracking Details:', {
-        without_carriers: statsRes.data?.orders_tracking?.without_carriers,
-        finished_without_invoices: statsRes.data?.orders_tracking?.finished_without_invoices,
-        with_overdue_invoices: statsRes.data?.orders_tracking?.with_overdue_invoices,
-        upcoming: statsRes.data?.orders_tracking?.upcoming?.length
-      });
-      console.log('Carriers Tracking Details:', {
-        without_invoices_count: statsRes.data?.carriers_tracking?.without_invoices?.count,
-        without_invoices_list: statsRes.data?.carriers_tracking?.without_invoices?.list?.length,
-        with_overdue_count: statsRes.data?.carriers_tracking?.with_overdue?.count,
-        with_overdue_list: statsRes.data?.carriers_tracking?.with_overdue?.list?.length
-      });
-      
+
       setStats(statsRes.data);
       setClientsOverdue(clientsRes.data.clients || []);
       setCarriersOverdue(carriersRes.data.carriers || []);
@@ -258,6 +288,42 @@ const DashboardPage_NEW: React.FC = () => {
             onClick={() => setPeriodType('year')}
           >
             Šie metai
+          </button>
+          <button
+            className={`period-btn ${periodType === 'last7' ? 'active' : ''}`}
+            onClick={() => setPeriodType('last7')}
+          >
+            Paskutinės 7 d.
+          </button>
+          <button
+            className={`period-btn ${periodType === 'last14' ? 'active' : ''}`}
+            onClick={() => setPeriodType('last14')}
+          >
+            Paskutinės 14 d.
+          </button>
+          <button
+            className={`period-btn ${periodType === 'last30' ? 'active' : ''}`}
+            onClick={() => setPeriodType('last30')}
+          >
+            Paskutiniai 30 d.
+          </button>
+          <button
+            className={`period-btn ${periodType === 'last_month' ? 'active' : ''}`}
+            onClick={() => setPeriodType('last_month')}
+          >
+            Praeitas mėnuo
+          </button>
+          <button
+            className={`period-btn ${periodType === 'last_quarter' ? 'active' : ''}`}
+            onClick={() => setPeriodType('last_quarter')}
+          >
+            Praeitas ketvirtis
+          </button>
+          <button
+            className={`period-btn ${periodType === 'last_year' ? 'active' : ''}`}
+            onClick={() => setPeriodType('last_year')}
+          >
+            Praeiti metai
           </button>
           <button
             className={`period-btn ${periodType === 'all' ? 'active' : ''}`}
@@ -361,11 +427,12 @@ const DashboardPage_NEW: React.FC = () => {
             <span className="metric-label">Užsakymai</span>
           </div>
           <div className="metric-value">
-            {(stats.orders?.finished || 0) + (stats.orders?.unfinished || 0)}
+            {stats.orders?.total ?? 0}
           </div>
           <div className="metric-details">
-            Nauji: {stats.orders?.new || 0} | Nebaigti: {(stats.orders?.unfinished || 0) - (stats.orders?.new || 0)} | Baigti: {stats.orders?.finished || 0}
+            Nauji: {stats.orders?.new ?? 0} | Priskirti: {stats.orders?.assigned ?? 0} | Vykdomi: {stats.orders?.executing ?? 0} | Laukia: {(stats.orders?.waiting_for_docs ?? 0) + (stats.orders?.waiting_for_payment ?? 0)} | Baigti: {stats.orders?.finished ?? 0} | Uždaryti: {stats.orders?.closed ?? 0} | Atšaukti: {stats.orders?.canceled ?? 0}
           </div>
+          <div className="metric-hint">Viso užsakymų</div>
         </div>
 
         <div
@@ -467,6 +534,11 @@ const DashboardPage_NEW: React.FC = () => {
                 <div className="invoice-count">{stats.invoices.unpaid_sales.count}</div>
                 <div className="invoice-amount">{formatCurrency(stats.invoices.unpaid_sales.total)}</div>
               </div>
+              <div className="invoice-card invoice-partially-paid">
+                <div className="invoice-label">Išrašytos dalinai apmokėtos</div>
+                <div className="invoice-count">{stats.invoices.partially_paid_sales?.count ?? 0}</div>
+                <div className="invoice-amount">{formatCurrency(stats.invoices.partially_paid_sales?.total ?? '0')}</div>
+              </div>
               <div className="invoice-card invoice-overdue">
                 <div className="invoice-label">Išrašytos vėluojančios</div>
                 <div className="invoice-count">{stats.invoices.overdue_sales.count}</div>
@@ -485,6 +557,11 @@ const DashboardPage_NEW: React.FC = () => {
                 <div className="invoice-label">Gautos neapmokėtos</div>
                 <div className="invoice-count">{stats.invoices.unpaid_purchase.count}</div>
                 <div className="invoice-amount">{formatCurrency(stats.invoices.unpaid_purchase.total)}</div>
+              </div>
+              <div className="invoice-card invoice-partially-paid">
+                <div className="invoice-label">Gautos dalinai apmokėtos</div>
+                <div className="invoice-count">{stats.invoices.partially_paid_purchase?.count ?? 0}</div>
+                <div className="invoice-amount">{formatCurrency(stats.invoices.partially_paid_purchase?.total ?? '0')}</div>
               </div>
               <div className="invoice-card invoice-overdue">
                 <div className="invoice-label">Gautos vėluojančios</div>
@@ -529,10 +606,38 @@ const DashboardPage_NEW: React.FC = () => {
                   <span>⚠️ Su vėluojančiomis</span>
                   <span className="tracking-count">{stats.orders_tracking?.with_overdue_invoices ?? 0}</span>
                 </div>
+                <div
+                  className="tracking-item tracking-info"
+                  onClick={() => navigate('/orders')}
+                >
+                  <span>📦 Be krovinių</span>
+                  <span className="tracking-count">{stats.orders_tracking?.without_cargo ?? 0}</span>
+                </div>
+                <div
+                  className="tracking-item tracking-info"
+                  onClick={() => navigate('/orders')}
+                >
+                  <span>🛣️ Be maršruto</span>
+                  <span className="tracking-count">{stats.orders_tracking?.without_route ?? 0}</span>
+                </div>
+                <div
+                  className="tracking-item tracking-info"
+                  onClick={() => navigate('/orders')}
+                >
+                  <span>💰 Be kainos klientui</span>
+                  <span className="tracking-count">{stats.orders_tracking?.without_client_price ?? 0}</span>
+                </div>
+                <div
+                  className="tracking-item tracking-info"
+                  onClick={() => navigate('/orders')}
+                >
+                  <span>💰 Be kainos vežėjui</span>
+                  <span className="tracking-count">{stats.orders_tracking?.without_carrier_price ?? 0}</span>
+                </div>
               </div>
-              {stats.orders_tracking?.upcoming && stats.orders_tracking.upcoming.length > 0 && (
-                <div className="upcoming-orders">
-                  <div className="subsection-header">📅 Artimiausi užsakymai (7d.)</div>
+              <div className="upcoming-orders">
+                <div className="subsection-header">📅 Artimiausi užsakymai (7d.)</div>
+                {stats.orders_tracking?.upcoming && stats.orders_tracking.upcoming.length > 0 ? (
                   <div className="upcoming-list">
                     {stats.orders_tracking.upcoming.map((order: any) => (
                       <div
@@ -554,8 +659,10 @@ const DashboardPage_NEW: React.FC = () => {
                       </div>
                     ))}
                   </div>
-                </div>
-              )}
+                ) : (
+                  <div className="dashboard-empty-hint">Nėra artimiausiu užsakymų per 7 dienas</div>
+                )}
+              </div>
             </div>
           )}
 
@@ -585,14 +692,16 @@ const DashboardPage_NEW: React.FC = () => {
 
         {/* Right Column - Clients & Carriers with Overdue */}
         <div className="dashboard-column">
-          {/* Clients with Overdue */}
-          {clientsOverdue.length > 0 && (
-            <div className="dashboard-section">
-              <div className="section-header">
-                <h2>👥 Klientai su vėluojančiomis ({clientsOverdue.length})</h2>
-              </div>
-              <div className="overdue-list">
-                {clientsOverdue.slice(0, 10).map((client) => (
+          {/* Clients with Overdue - visada rodoma */}
+          <div className="dashboard-section">
+            <div className="section-header">
+              <h2>👥 Klientai su vėluojančiomis ({clientsOverdue.length})</h2>
+            </div>
+            <div className="overdue-list">
+              {clientsOverdue.length === 0 ? (
+                <div className="dashboard-empty-hint">Nėra klientų su vėluojančiomis sąskaitomis</div>
+              ) : (
+                clientsOverdue.slice(0, 10).map((client) => (
                   <div
                     key={client.id}
                     className="overdue-item"
@@ -609,19 +718,21 @@ const DashboardPage_NEW: React.FC = () => {
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
 
-          {/* Carriers with Overdue */}
-          {carriersOverdue.length > 0 && (
-            <div className="dashboard-section">
-              <div className="section-header">
-                <h2>🚚 Vežėjai su vėluojančiomis ({carriersOverdue.length})</h2>
-              </div>
-              <div className="overdue-list">
-                {carriersOverdue.slice(0, 10).map((carrier) => (
+          {/* Carriers with Overdue - visada rodoma */}
+          <div className="dashboard-section">
+            <div className="section-header">
+              <h2>🚚 Vežėjai su vėluojančiomis ({carriersOverdue.length})</h2>
+            </div>
+            <div className="overdue-list">
+              {carriersOverdue.length === 0 ? (
+                <div className="dashboard-empty-hint">Nėra vežėjų su vėluojančiomis sąskaitomis</div>
+              ) : (
+                carriersOverdue.slice(0, 10).map((carrier) => (
                   <div
                     key={carrier.id}
                     className="overdue-item"
@@ -638,10 +749,10 @@ const DashboardPage_NEW: React.FC = () => {
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

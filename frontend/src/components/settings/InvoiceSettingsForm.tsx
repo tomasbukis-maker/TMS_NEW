@@ -17,6 +17,10 @@ interface InvoiceSettings {
   invoice_number_width: number;
   invoice_footer_text: string;
   auto_numbering: boolean;
+  currency_code?: string;
+  currency_symbol?: string;
+  decimal_places?: number;
+  decimal_separator?: string;
   last_invoice_number?: string | null;
   next_invoice_number?: string;
   next_invoice_number_edit?: string;
@@ -125,18 +129,6 @@ const InvoiceSettingsForm: React.FC<InvoiceSettingsFormProps> = ({
 
   const updateField = (field: keyof InvoiceSettings, value: any) => {
     const updated = { ...invoiceSettings, [field]: value };
-    setInvoiceSettings(updated);
-    onUpdate(updated);
-  };
-
-  const updateDisplayOption = (option: string, value: boolean) => {
-    const updated = {
-      ...invoiceSettings,
-      default_display_options: {
-        ...invoiceSettings.default_display_options,
-        [option]: value,
-      }
-    };
     setInvoiceSettings(updated);
     onUpdate(updated);
   };
@@ -351,6 +343,58 @@ const InvoiceSettingsForm: React.FC<InvoiceSettingsFormProps> = ({
             </div>
           </div>
 
+          {/* Valiutos ir skaičių formatavimas */}
+          <div className="form-grid invoice-settings-grid" style={{ marginTop: '12px', padding: '10px', backgroundColor: '#f9f9f9', borderRadius: '4px', border: '1px solid #eee', gap: '8px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr' }}>
+            <div className="form-field">
+              <label style={{ fontSize: '11px', marginBottom: '3px' }}>Valiutos kodas</label>
+              <input
+                type="text"
+                maxLength={10}
+                value={invoiceSettings.currency_code ?? 'EUR'}
+                onChange={(e) => updateField('currency_code', e.target.value)}
+                placeholder="EUR"
+                style={{ padding: '4px 6px', fontSize: '12px' }}
+              />
+              <small style={{ color: '#666', fontSize: '9px' }}>Pvz.: EUR, USD</small>
+            </div>
+            <div className="form-field">
+              <label style={{ fontSize: '11px', marginBottom: '3px' }}>Valiutos simbolis</label>
+              <input
+                type="text"
+                maxLength={10}
+                value={invoiceSettings.currency_symbol ?? '€'}
+                onChange={(e) => updateField('currency_symbol', e.target.value)}
+                placeholder="€"
+                style={{ padding: '4px 6px', fontSize: '12px' }}
+              />
+              <small style={{ color: '#666', fontSize: '9px' }}>Pvz.: €, $</small>
+            </div>
+            <div className="form-field">
+              <label style={{ fontSize: '11px', marginBottom: '3px' }}>Skaitmenų po kablelio</label>
+              <input
+                type="number"
+                min={0}
+                max={6}
+                value={invoiceSettings.decimal_places ?? 2}
+                onChange={(e) => updateField('decimal_places', parseInt(e.target.value, 10) ?? 2)}
+                style={{ padding: '4px 6px', fontSize: '12px' }}
+              />
+              <small style={{ color: '#666', fontSize: '9px' }}>0–6</small>
+            </div>
+            <div className="form-field">
+              <label style={{ fontSize: '11px', marginBottom: '3px' }}>Dešimtainis skyriklis</label>
+              <select
+                value={invoiceSettings.decimal_separator ?? ','}
+                onChange={(e) => updateField('decimal_separator', e.target.value)}
+                style={{ padding: '4px 6px', fontSize: '12px', width: '100%' }}
+              >
+                <option value=",">Kablelis (,)</option>
+                <option value=".">Taškas (.)</option>
+              </select>
+              <small style={{ color: '#666', fontSize: '9px' }}>Pvz.: 23,50</small>
+            </div>
+          </div>
+
           {/* Kiti nustatymai */}
           <div className="form-grid invoice-settings-grid" style={{ marginTop: '8px', gap: '8px', display: 'grid', gridTemplateColumns: '1fr 1fr 1fr' }}>
             <div className="form-field">
@@ -386,95 +430,6 @@ const InvoiceSettingsForm: React.FC<InvoiceSettingsFormProps> = ({
                 placeholder="Šis tekstas bus rodomas sąskaitos apačioje..."
                 style={{ padding: '4px 6px', fontSize: '11px', width: '100%' }}
               />
-            </div>
-            
-            {/* Rodymo pasirinkimai pagal nutylėjimą */}
-            <div className="form-field full-width" style={{ borderTop: '1px solid #e0e0e0', paddingTop: '6px', marginTop: '4px' }}>
-              <h3 style={{ marginBottom: '4px', fontSize: '11px', fontWeight: 'bold' }}>Sąskaitos rodymo nustatymai (pagal nutylėjimą)</h3>
-              
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', marginTop: '4px' }}>
-                {/* Užsakymo tipas */}
-                <div style={{ padding: '4px', backgroundColor: '#f9f9f9', borderRadius: '3px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', fontSize: '10px' }}>
-                    <input
-                      type="checkbox"
-                      checked={invoiceSettings.default_display_options?.show_order_type ?? true}
-                      onChange={(e) => updateDisplayOption('show_order_type', e.target.checked)}
-                      style={{ marginRight: '4px' }}
-                    />
-                    Užsakymo tipas
-                  </label>
-                </div>
-                
-                {/* Krovinių informacija */}
-                <div style={{ padding: '4px', backgroundColor: '#f9f9f9', borderRadius: '3px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', fontSize: '10px' }}>
-                    <input
-                      type="checkbox"
-                      checked={invoiceSettings.default_display_options?.show_cargo_info ?? true}
-                      onChange={(e) => {
-                        // Kai keičiasi show_cargo_info, automatiškai nustatyti visus sub-options į tą pačią reikšmę
-                        const value = e.target.checked;
-                        const updated = {
-                          ...invoiceSettings,
-                          default_display_options: {
-                            ...invoiceSettings.default_display_options,
-                            show_cargo_info: value,
-                            show_cargo_weight: value,
-                            show_cargo_ldm: value,
-                            show_cargo_dimensions: value,
-                            show_cargo_properties: value
-                          }
-                        };
-                        setInvoiceSettings(updated);
-                        onUpdate(updated);
-                      }}
-                      style={{ marginRight: '4px' }}
-                    />
-                    Krovinių informacija (svoris, matmenys, savybės)
-                  </label>
-                </div>
-                
-                {/* Vežėjai ir sandėliai */}
-                <div style={{ padding: '4px', backgroundColor: '#f9f9f9', borderRadius: '3px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', fontSize: '10px' }}>
-                    <input
-                      type="checkbox"
-                      checked={invoiceSettings.default_display_options?.show_carriers ?? false}
-                      onChange={(e) => {
-                        const value = e.target.checked;
-                        const updated = {
-                          ...invoiceSettings,
-                          default_display_options: {
-                            ...invoiceSettings.default_display_options,
-                            show_carriers: value,
-                            show_carrier_name: value,
-                            show_carrier_route: value,
-                            show_carrier_dates: value
-                          }
-                        };
-                        setInvoiceSettings(updated);
-                        onUpdate(updated);
-                      }}
-                      style={{ marginRight: '4px' }}
-                    />
-                    Vežėjai (NESIŪLOMA rodyti klientams!)
-                  </label>
-                </div>
-                
-                {/* Papildomos išlaidos */}
-                <div style={{ padding: '4px', backgroundColor: '#f9f9f9', borderRadius: '3px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', fontSize: '10px' }}>
-                    <input
-                      type="checkbox"
-                      checked={invoiceSettings.default_display_options?.show_other_costs ?? true}
-                      onChange={(e) => updateDisplayOption('show_other_costs', e.target.checked)}
-                      style={{ marginRight: '4px' }}
-                    />
-                    Papildomos išlaidos (muitinė, draudimas ir t.t.)
-                  </label>
-                </div>
-              </div>
             </div>
             
             <div className="form-field full-width">

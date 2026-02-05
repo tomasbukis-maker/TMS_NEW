@@ -407,13 +407,10 @@ const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
         const orders = ordersResponse.data?.results || [];
         if (orders.length > 0) {
           const selectedOrder = orders[0];
-          // PurchaseInvoice naudoja related_order_ids (ManyToMany) arba related_order_id (ForeignKey)
-          // Siųsti kaip masyvą, kad serializer galėtų apdoroti
-          formData.append('related_order_ids', selectedOrder.id.toString());
-          // Taip pat nustatyti related_order_id (ForeignKey) suderinamumui
+          // Backend tikisi related_order_ids kaip JSON masyvą, pvz. "[123]"
+          formData.append('related_order_ids', JSON.stringify([selectedOrder.id]));
           formData.append('related_order_id', selectedOrder.id.toString());
 
-          // Gauti užsakymo sumą ir nusiųsti į backend
           const orderAmount = selectedOrder.price_with_vat || selectedOrder.price_net || 0;
           const relatedOrdersAmounts = [{
             order_id: selectedOrder.id,
@@ -421,20 +418,15 @@ const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
           }];
           formData.append('related_orders_amounts', JSON.stringify(relatedOrdersAmounts));
         } else {
-          // Pabandykime ieškoti pagal search
           const directOrdersResponse = await api.get('/orders/orders/', {
             params: { search: relatedOrderNumber, page_size: 5 }
           });
           const directOrders = directOrdersResponse.data?.results || [];
           if (directOrders.length > 0) {
             const selectedOrder = directOrders[0];
-            // PurchaseInvoice naudoja related_order_ids (ManyToMany) arba related_order_id (ForeignKey)
-            // Siųsti kaip masyvą, kad serializer galėtų apdoroti
-            formData.append('related_order_ids', selectedOrder.id.toString());
-            // Taip pat nustatyti related_order_id (ForeignKey) suderinamumui
+            formData.append('related_order_ids', JSON.stringify([selectedOrder.id]));
             formData.append('related_order_id', selectedOrder.id.toString());
 
-            // Gauti užsakymo sumą ir nusiųsti į backend
             const orderAmount = selectedOrder.price_with_vat || selectedOrder.price_net || 0;
             const relatedOrdersAmounts = [{
               order_id: selectedOrder.id,
@@ -478,7 +470,8 @@ const AttachmentPreviewModal: React.FC<AttachmentPreviewModalProps> = ({
         }
 
         if (orderIds.length > 0) {
-          formData.append('related_order_ids', orderIds.join(','));
+          // Backend tikisi related_order_ids kaip JSON masyvą, pvz. "[1,2,3]"
+          formData.append('related_order_ids', JSON.stringify(orderIds.map(id => parseInt(id, 10))));
           formData.append('related_orders_amounts', JSON.stringify(relatedOrdersAmounts));
         }
       } else {

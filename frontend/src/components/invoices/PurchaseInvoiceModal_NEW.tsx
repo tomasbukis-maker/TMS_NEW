@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next';
 import { api } from '../../services/api';
 import PaymentService from '../../services/paymentService';
+import { formatMoney } from '../../utils/formatMoney';
 import '../../pages/InvoicesPage.css';
 
 // Interfaces
@@ -31,6 +32,35 @@ interface Order {
     };
     price_net?: string | number;
   }>;
+  other_costs?: Array<{ description?: string; amount?: number | string }>;
+}
+
+/** Vežėjo kaina + papildomos išlaidos užsakyme (bendra suma už užsakymą) */
+function getOrderAmountWithOtherCosts(
+  order: Order | undefined,
+  partnerId?: number
+): number {
+  if (!order) return 0;
+  let carrierAmount = 0;
+  if (order.carriers && order.carriers.length > 0) {
+    if (partnerId != null) {
+      const carrier = order.carriers.find((c: any) =>
+        c.partner && (c.partner.id === partnerId || c.partner === partnerId)
+      );
+      if (carrier && carrier.price_net) carrierAmount = parseFloat(String(carrier.price_net)) || 0;
+      else {
+        const cw = order.carriers.find((c: any) => c.price_net && Number(c.price_net) > 0);
+        if (cw && cw.price_net) carrierAmount = parseFloat(String(cw.price_net)) || 0;
+      }
+    } else {
+      const cw = order.carriers.find((c: any) => c.price_net && Number(c.price_net) > 0);
+      if (cw && cw.price_net) carrierAmount = parseFloat(String(cw.price_net)) || 0;
+    }
+  }
+  const other = (order.other_costs && Array.isArray(order.other_costs))
+    ? order.other_costs.reduce((s, c) => s + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0)
+    : 0;
+  return carrierAmount + other;
 }
 
 interface ExpenseCategory {
@@ -176,6 +206,7 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
   const initialFormDataRef = useRef<any>(null);
   const initialRelatedOrdersRef = useRef<Array<{ order_id: number; amount: string }>>([]);
   const isInitializingRef = useRef(false);
+  const initialCaptureDoneRef = useRef(false);
   
   // Fetch expense categories
   const fetchExpenseCategories = useCallback(async () => {
@@ -228,11 +259,13 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
       setActiveTab('pagrindinis');
       setHasUnsavedChanges(false);
       isInitializingRef.current = false;
+      initialCaptureDoneRef.current = false;
       return;
     }
     
     // Set initializing flag when modal opens
     isInitializingRef.current = true;
+    initialCaptureDoneRef.current = false;
     
     // Load base data
     fetchExpenseCategories();
@@ -299,40 +332,14 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
               return [...prev, fullOrder];
             });
             
-            // Rasti vežėjo sumą: jei yra pasirinktas tiekėjas, rasti vežėją su tuo tiekėju
-            if (invoiceData.partner_id && fullOrder.carriers && fullOrder.carriers.length > 0) {
-              // Gauti partner_id - gali būti objektas arba skaičius
-              let partnerIdValue: any = invoiceData.partner_id;
-              if (typeof partnerIdValue === 'object' && partnerIdValue !== null && 'id' in partnerIdValue) {
-                partnerIdValue = (partnerIdValue as any).id;
-              }
-              const partnerIdInt = parseInt(String(partnerIdValue), 10);
-              
-              const carrier = fullOrder.carriers.find((c: any) => 
-                c.partner && (c.partner.id === partnerIdInt || c.partner === partnerIdInt)
-              );
-              if (carrier && carrier.price_net) {
-                orderAmount = typeof carrier.price_net === 'number' 
-                  ? carrier.price_net.toFixed(2) 
-                  : String(carrier.price_net);
-              } else {
-                // Jei nerasta su tiekėju, rasti pirmą vežėją su price_net
-                const carrierWithPrice = fullOrder.carriers.find((c: any) => c.price_net && c.price_net > 0);
-                if (carrierWithPrice && carrierWithPrice.price_net) {
-                  orderAmount = typeof carrierWithPrice.price_net === 'number' 
-                    ? carrierWithPrice.price_net.toFixed(2) 
-                    : String(carrierWithPrice.price_net);
-                }
-              }
-            } else if (fullOrder.carriers && fullOrder.carriers.length > 0) {
-              // Jei nėra pasirinkto tiekėjo, rasti pirmą vežėją su price_net
-              const carrierWithPrice = fullOrder.carriers.find((c: any) => c.price_net && c.price_net > 0);
-              if (carrierWithPrice && carrierWithPrice.price_net) {
-                orderAmount = typeof carrierWithPrice.price_net === 'number' 
-                  ? carrierWithPrice.price_net.toFixed(2) 
-                  : String(carrierWithPrice.price_net);
-              }
-            }
+            // Vežėjo suma + papildomos išlaidos užsakyme
+            const partnerIdInt = invoiceData.partner_id != null
+              ? (typeof invoiceData.partner_id === 'object' && invoiceData.partner_id !== null && 'id' in invoiceData.partner_id
+                  ? (invoiceData.partner_id as any).id
+                  : parseInt(String(invoiceData.partner_id), 10))
+              : undefined;
+            const amountWithOther = getOrderAmountWithOtherCosts(fullOrder, partnerIdInt);
+            if (amountWithOther > 0) orderAmount = amountWithOther.toFixed(2);
           } catch (error) {
             // Ignoruoti klaidą, naudoti tuščią sumą
           }
@@ -355,53 +362,23 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
         }
       }
       
-      // Jei sumos nėra, bandyti gauti iš vežėjo sumos
+      // Jei sumos nėra, gauti vežėjo suma + papildomos išlaidos
       if (!orderAmount || orderAmount === '0.00' || orderAmount === '') {
         try {
           const orderResponse = await api.get(`/orders/orders/${orderId}/`);
           const fullOrder = orderResponse.data;
-          
-          // Atnaujinti užsakymų sąrašą
           setOrders(prev => {
             const existing = prev.find(o => o.id === orderId);
-            if (existing) {
-              return prev.map(o => o.id === orderId ? fullOrder : o);
-            }
+            if (existing) return prev.map(o => o.id === orderId ? fullOrder : o);
             return [...prev, fullOrder];
           });
-          
-          // Rasti vežėjo sumą
-          if (invoiceData.partner_id && fullOrder.carriers && fullOrder.carriers.length > 0) {
-            // Gauti partner_id - gali būti objektas arba skaičius
-            let partnerIdValue: any = invoiceData.partner_id;
-            if (typeof partnerIdValue === 'object' && partnerIdValue !== null && 'id' in partnerIdValue) {
-              partnerIdValue = (partnerIdValue as any).id;
-            }
-            const partnerIdInt = parseInt(String(partnerIdValue), 10);
-            
-            const carrier = fullOrder.carriers.find((c: any) => 
-              c.partner && (c.partner.id === partnerIdInt || c.partner === partnerIdInt)
-            );
-            if (carrier && carrier.price_net) {
-              orderAmount = typeof carrier.price_net === 'number' 
-                ? carrier.price_net.toFixed(2) 
-                : String(carrier.price_net);
-            } else {
-              const carrierWithPrice = fullOrder.carriers.find((c: any) => c.price_net && c.price_net > 0);
-              if (carrierWithPrice && carrierWithPrice.price_net) {
-                orderAmount = typeof carrierWithPrice.price_net === 'number' 
-                  ? carrierWithPrice.price_net.toFixed(2) 
-                  : String(carrierWithPrice.price_net);
-              }
-            }
-          } else if (fullOrder.carriers && fullOrder.carriers.length > 0) {
-            const carrierWithPrice = fullOrder.carriers.find((c: any) => c.price_net && c.price_net > 0);
-            if (carrierWithPrice && carrierWithPrice.price_net) {
-              orderAmount = typeof carrierWithPrice.price_net === 'number' 
-                ? carrierWithPrice.price_net.toFixed(2) 
-                : String(carrierWithPrice.price_net);
-            }
-          }
+          const partnerIdInt = invoiceData.partner_id != null
+            ? (typeof invoiceData.partner_id === 'object' && invoiceData.partner_id !== null && 'id' in invoiceData.partner_id
+                ? (invoiceData.partner_id as any).id
+                : parseInt(String(invoiceData.partner_id), 10))
+            : undefined;
+          const amountWithOther = getOrderAmountWithOtherCosts(fullOrder, partnerIdInt);
+          if (amountWithOther > 0) orderAmount = amountWithOther.toFixed(2);
         } catch (error) {
           // Ignoruoti klaidą
         }
@@ -715,7 +692,7 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
     
     try {
       const response = await api.get('/partners/partners/', {
-        params: { search: query, is_supplier: true, page_size: 20 }
+        params: { search: query, is_supplier: true, page_size: 20, include_code_errors: 1 }
       });
       const results = response.data.results || response.data;
       setSuppliers(results.filter((p: Partner) => p.name.toLowerCase().includes(query.toLowerCase())));
@@ -817,17 +794,12 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
             }
           }
           
-          if (order && order.carriers && order.carriers.length > 0) {
-            const carrier = order.carriers.find((c: any) => 
-              c.partner && (c.partner.id === partnerId || c.partner === partnerId)
-            );
-            if (carrier && carrier.price_net) {
-              const carrierPriceNet = typeof carrier.price_net === 'number' 
-                ? carrier.price_net.toFixed(2) 
-                : String(carrier.price_net);
-              
-              if (updatedRelatedOrders[i].amount !== carrierPriceNet) {
-                updatedRelatedOrders[i].amount = carrierPriceNet;
+          if (order) {
+            const amountWithOther = getOrderAmountWithOtherCosts(order, partnerId);
+            if (amountWithOther > 0) {
+              const newAmount = amountWithOther.toFixed(2);
+              if (updatedRelatedOrders[i].amount !== newAmount) {
+                updatedRelatedOrders[i].amount = newAmount;
                 hasChanges = true;
               }
             }
@@ -858,6 +830,19 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
   // Track form changes for unsaved changes warning
   useEffect(() => {
     if (isInitializingRef.current) {
+      return;
+    }
+    
+    // Pirmą kartą po init – nustatyti baseline iš dabartinio formData, kad nepraneštų „neišsaugota“ tik atidarius
+    if (initialFormDataRef.current && !initialCaptureDoneRef.current) {
+      initialFormDataRef.current = JSON.parse(JSON.stringify(formData));
+      initialRelatedOrdersRef.current = [...(formData.related_orders || [])];
+      initialCaptureDoneRef.current = true;
+      setHasUnsavedChanges(false);
+      return;
+    }
+    
+    if (!initialFormDataRef.current) {
       return;
     }
     
@@ -1696,7 +1681,7 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
                                     <div>
                                       <div style={{ fontSize: '11px', color: '#666', marginBottom: '2px' }}>Suma</div>
                                       <div style={{ fontSize: '14px', fontWeight: '600', color: '#495057' }}>
-                                        {Number(payment.amount).toFixed(2)} €
+                                        {formatMoney(payment.amount)}
                                       </div>
                                     </div>
                                     <div>
@@ -1809,32 +1794,14 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
                           const order = orders.find(o => o.id === relatedOrder.order_id);
                           const clientName = order?.client?.name || order?.client_name || 'Nėra kliento';
                           
-                          // Rasti vežėjo sumą: jei yra pasirinktas tiekėjas, rasti vežėją su tuo tiekėju
-                          let carrierAmount: string | number | null = null;
-                          if (order && formData.partner_id) {
-                            const partnerId = parseInt(formData.partner_id, 10);
-                            if (order.carriers && order.carriers.length > 0) {
-                              const carrier = order.carriers.find((c: any) => 
-                                c.partner && (c.partner.id === partnerId || c.partner === partnerId)
-                              );
-                              if (carrier && carrier.price_net) {
-                                carrierAmount = carrier.price_net;
-                              }
-                            }
-                          }
-                          
-                          // Jei nerasta vežėjo sumos, naudoti išsaugotą sumą arba bandyti gauti iš užsakymo vežėjų
-                          // Bet visada naudoti relatedOrder.amount jei jis yra
+                          // Suma: išsaugota arba vežėjo + papildomos išlaidos užsakyme
+                          const partnerId = formData.partner_id ? parseInt(formData.partner_id, 10) : undefined;
                           let displayAmount: string | number | null = null;
                           if (relatedOrder.amount && relatedOrder.amount !== '') {
                             displayAmount = relatedOrder.amount;
-                          } else if (carrierAmount !== null) {
-                            displayAmount = carrierAmount;
-                          } else if (order?.carriers && order.carriers.length > 0) {
-                            const carrierWithPrice = order.carriers.find((c: any) => c.price_net && c.price_net > 0);
-                            if (carrierWithPrice && carrierWithPrice.price_net) {
-                              displayAmount = carrierWithPrice.price_net;
-                            }
+                          } else if (order) {
+                            const amountWithOther = getOrderAmountWithOtherCosts(order, partnerId);
+                            if (amountWithOther > 0) displayAmount = amountWithOther.toFixed(2);
                           }
                           
                           return (
@@ -1875,34 +1842,10 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
                                         }
                                         setOrders(updatedOrders);
                                         
-                                        // Rasti vežėjo sumą: jei yra pasirinktas tiekėjas, rasti vežėją su tuo tiekėju
-                                        let carrierPriceNet: string | number | null = null;
-                                        if (formData.partner_id && fullOrder.carriers && fullOrder.carriers.length > 0) {
-                                          const partnerId = parseInt(formData.partner_id, 10);
-                                          const carrier = fullOrder.carriers.find((c: any) => 
-                                            c.partner && (c.partner.id === partnerId || c.partner === partnerId)
-                                          );
-                                          if (carrier && carrier.price_net) {
-                                            carrierPriceNet = carrier.price_net;
-                                          } else {
-                                            // Jei nerasta su tiekėju, rasti pirmą vežėją su price_net
-                                            const carrierWithPrice = fullOrder.carriers.find((c: any) => c.price_net && c.price_net > 0);
-                                            if (carrierWithPrice) {
-                                              carrierPriceNet = carrierWithPrice.price_net;
-                                            }
-                                          }
-                                        } else if (fullOrder.carriers && fullOrder.carriers.length > 0) {
-                                          // Jei nėra pasirinkto tiekėjo, rasti pirmą vežėją su price_net
-                                          const carrierWithPrice = fullOrder.carriers.find((c: any) => c.price_net && c.price_net > 0);
-                                          if (carrierWithPrice) {
-                                            carrierPriceNet = carrierWithPrice.price_net;
-                                          }
-                                        }
-                                        
-                                        if (carrierPriceNet !== null) {
-                                          updated[index].amount = typeof carrierPriceNet === 'number' 
-                                            ? carrierPriceNet.toFixed(2) 
-                                            : String(carrierPriceNet);
+                                        const partnerId = formData.partner_id ? parseInt(formData.partner_id, 10) : undefined;
+                                        const amountWithOther = getOrderAmountWithOtherCosts(fullOrder, partnerId);
+                                        if (amountWithOther > 0) {
+                                          updated[index].amount = amountWithOther.toFixed(2);
                                         }
                                       } catch (error) {
                                       }
@@ -1958,11 +1901,12 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
                                     minHeight: '32px'
                                   }}
                                 >
-                                  {displayAmount ? `${parseFloat(String(displayAmount)).toFixed(2)} EUR` : '-'}
+                                  {displayAmount ? formatMoney(displayAmount) : '-'}
                                 </div>
                               </div>
                               <button
                                 type="button"
+                                title="Pašalinti šį užsakymą iš sąskaitos"
                                 onClick={() => {
                                   const updated = formData.related_orders.filter((_, i) => i !== index);
                                   
@@ -2038,37 +1982,17 @@ const PurchaseInvoiceModal_NEW: React.FC<PurchaseInvoiceModalProps> = ({
                         <div style={{ fontSize: '16px', fontWeight: '600', color: '#007bff' }}>
                           {(() => {
                             const total = formData.related_orders.reduce((sum, ro) => {
-                              // Naudoti tą pačią logiką kaip ir displayAmount
-                              let amountValue: number = 0;
+                              let amountValue = 0;
                               if (ro.amount && ro.amount !== '') {
                                 amountValue = parseFloat(String(ro.amount)) || 0;
                               } else if (ro.order_id) {
                                 const order = orders.find(o => o.id === ro.order_id);
-                                if (order && formData.partner_id) {
-                                  const partnerId = parseInt(formData.partner_id, 10);
-                                  if (order.carriers && order.carriers.length > 0) {
-                                    const carrier = order.carriers.find((c: any) => 
-                                      c.partner && (c.partner.id === partnerId || c.partner === partnerId)
-                                    );
-                                    if (carrier && carrier.price_net) {
-                                      amountValue = parseFloat(String(carrier.price_net)) || 0;
-                                    } else {
-                                      const carrierWithPrice = order.carriers.find((c: any) => c.price_net && c.price_net > 0);
-                                      if (carrierWithPrice) {
-                                        amountValue = parseFloat(String(carrierWithPrice.price_net)) || 0;
-                                      }
-                                    }
-                                  }
-                                } else if (order?.carriers && order.carriers.length > 0) {
-                                  const carrierWithPrice = order.carriers.find((c: any) => c.price_net && c.price_net > 0);
-                                  if (carrierWithPrice) {
-                                    amountValue = parseFloat(String(carrierWithPrice.price_net)) || 0;
-                                  }
-                                }
+                                const partnerId = formData.partner_id ? parseInt(formData.partner_id, 10) : undefined;
+                                amountValue = getOrderAmountWithOtherCosts(order, partnerId);
                               }
                               return sum + amountValue;
                             }, 0);
-                            return `${total.toFixed(2)} EUR`;
+                            return formatMoney(total);
                           })()}
                         </div>
                       </div>

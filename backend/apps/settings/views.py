@@ -715,21 +715,32 @@ class EmailTemplateViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Paruošti testinius duomenis šablonui
+        # Paruošti testinius duomenis šablonui (visi kintamieji, kad bet kuris šablonas nerūtų)
         test_context = {
             'invoice_number': 'TEST-001',
             'partner_name': 'Testinis Klientas',
-            'amount': '100.00',
-            'amount_net': '100.00',
-            'amount_total': '121.00',
+            'amount': '100,00 EUR',
+            'amount_net': '100,00 EUR',
+            'amount_total': '121,00 EUR',
             'vat_rate': '21',
             'issue_date': '2025-11-20',
             'due_date': '2025-12-20',
             'overdue_days': '0',
             'payment_status': 'Neapmokėta',
-            'order_number': 'ORD-001',
+            'order_number': '2026-001',
+            'client_order_number': 'KLT-2026-001',
+            'order_date': '2026-01-15',
+            'route_from': 'Vilnius, Lietuva',
+            'route_to': 'Ryga, Latvija',
+            'loading_date': '2026-01-20',
+            'unloading_date': '2026-01-22',
             'manager_name': 'Testinis Vadybininkas',
-            'other_unpaid_invoices': '',  # Testavimo režime tuščias, tikras siuntimas turės tikras duomenis
+            'other_unpaid_invoices': '',
+            'partner_code': '123456',
+            'partner_vat_code': 'LT123456789',
+            'price_net': '500,00 EUR',
+            'price_with_vat': '605,00 EUR',
+            'expedition_number': 'EXP-001',
         }
         
         from .email_utils import render_email_template

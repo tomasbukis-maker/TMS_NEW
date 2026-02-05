@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Sinchronizacijos skriptas iš serverio DB į lokalų DB.
-Serverio duomenys turi viršenybę - jei yra konfliktų, serverio duomenys perrašys lokalius.
-
-PIRMA padaro atsarginę kopiją lokalios DB, tada sinchronizuoja duomenis.
+Vienintelis skriptas: lokalė = serveris (vienodi duomenys visur).
+- Tik skaito iš serverio, serveryje nieko nenaikina.
+- Pirmiausia sukuria lokaliai trūkstamas lenteles (pagal serverio schemą).
+- Tada sinchronizuoja visas lenteles: serverio duomenys perrašo lokalius.
+Reikia SSH tunelio: ssh -L 3307:localhost:3306 admin_ai@100.112.219.50
 """
 
 import os
@@ -52,24 +53,137 @@ LOCAL_DB_CONFIG = {
     'database': 'tms_db_local'
 }
 
-# Lentelės, kurias reikia sinchronizuoti (prioritetas)
-# SVARBU: Sinchronizacija vyksta prioriteto tvarka - pirmiausia Partner, tada Order, tada Invoice
-# Formatas: (table_name, pk_field_name)
-SYNC_TABLES = [
-    # 1. Partneriai (pirmiausia, nes kiti modeliai nuo jų priklauso)
-    ('partners', 'id'),
-    ('contacts', 'id'),
-    # 2. Užsakymai
-    ('orders', 'id'),
-    ('order_carriers', 'id'),
-    ('cargo_items', 'id'),
-    ('order_costs', 'id'),
-    # 3. Sąskaitos (priklauso nuo Partner ir Order)
-    ('sales_invoices', 'id'),
-    ('sales_invoice_orders', 'id'),  # ManyToMany tarp SalesInvoice ir Order
-    ('expense_invoices', 'id'),  # PurchaseInvoice
-    ('purchase_invoices_related_orders', 'id'),  # ManyToMany
+# Lentelių sinchronizavimo tvarka (priklausomybės – pirmiausia pagrindai)
+ORDER_FIRST = [
+    'partners', 'contacts', 'orders', 'order_carriers', 'cargo_items', 'order_costs',
+    'sales_invoices', 'sales_invoice_orders', 'expense_invoices', 'purchase_invoices_related_orders',
 ]
+
+
+def get_all_server_tables(server_conn):
+    """Grąžina visų lentelių pavadinimus serveryje."""
+    cur = server_conn.cursor()
+    cur.execute("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s ORDER BY TABLE_NAME", (LOCAL_DB_CONFIG['database'],))
+    tables = [row[0] for row in cur.fetchall()]
+    cur.close()
+    return tables
+
+
+def get_pk_column(server_conn, table_name):
+    """Grąžina PK stulpelio pavadinimą tik jei PK vienas stulpelis (sync_table reikia)."""
+    cur = server_conn.cursor()
+    cur.execute("""
+        SELECT COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
+        WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s AND CONSTRAINT_NAME = 'PRIMARY'
+        ORDER BY ORDINAL_POSITION
+    """, (LOCAL_DB_CONFIG['database'], table_name))
+    rows = cur.fetchall()
+    cur.close()
+    if not rows or len(rows) > 1:
+        return None
+    return rows[0][0]
+
+
+def compare_table(server_conn, local_conn, table_name, pk_field='id', where_clause=None):
+    """
+    Palygina lentelę tarp serverio ir lokalios DB.
+    Grąžina (count_server, count_local, ids_only_server, ids_only_local).
+    """
+    where_sql = f" WHERE {where_clause}" if where_clause else ""
+    try:
+        sc = server_conn.cursor()
+        lc = local_conn.cursor()
+        sc.execute(f"SELECT `{pk_field}` FROM `{table_name}`{where_sql}")
+        server_ids = {row[0] for row in sc.fetchall()}
+        lc.execute(f"SELECT `{pk_field}` FROM `{table_name}`{where_sql}")
+        local_ids = {row[0] for row in lc.fetchall()}
+        sc.close()
+        lc.close()
+        only_server = server_ids - local_ids
+        only_local = local_ids - server_ids
+        return len(server_ids), len(local_ids), only_server, only_local
+    except Exception as e:
+        logger.warning(f"  Nepavyko lyginti {table_name}: {e}")
+        return None, None, set(), set()
+
+
+def run_compare(server_conn, local_conn):
+    """
+    Palygina užsakymų, sąskaitų ir klientų (partnerių) duomenis: serveris vs lokalė.
+    Išveda skaičius ir ID, kurių yra tik serveryje arba tik lokaliai.
+    """
+    logger.info("=" * 60)
+    logger.info("📊 PALYGINIMAS: Serverio DB vs Lokalė (užsakymai, sąskaitos, klientai)")
+    logger.info("=" * 60)
+
+    # Lentelės, kurioms lyginti (lentelė, PK, optional WHERE)
+    tables_to_compare = [
+        ("partners", "id", None),
+        ("partners (klientai is_client=1)", "id", "is_client = 1"),
+        ("orders", "id", None),
+        ("sales_invoices", "id", None),
+        ("purchase_invoices", "id", None),
+    ]
+
+    for item in tables_to_compare:
+        if " (" in item[0]:
+            table_name = item[0].split(" (")[0]
+            where_clause = item[2]
+        else:
+            table_name = item[0]
+            where_clause = item[2]
+        pk_field = item[1]
+
+        c_s, c_l, only_s, only_l = compare_table(server_conn, local_conn, table_name, pk_field, where_clause)
+        if c_s is None:
+            continue
+
+        label = item[0]
+        logger.info("")
+        logger.info(f"  📋 {label}")
+        logger.info(f"     Serveris: {c_s} įrašų")
+        logger.info(f"     Lokalė:   {c_l} įrašų")
+        if c_s != c_l:
+            logger.info(f"     ⚠️  Skirtumas: {c_s - c_l:+d}")
+        if only_s:
+            sample = sorted(only_s)[:30]
+            logger.info(f"     Tik serveryje (ID): {len(only_s)} vnt. Pvz.: {sample}")
+        if only_l:
+            sample = sorted(only_l)[:30]
+            logger.info(f"     Tik lokaliai (ID):  {len(only_l)} vnt. Pvz.: {sample}")
+        if c_s == c_l and not only_s and not only_l:
+            logger.info(f"     ✅ Sutampa")
+
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("Palyginimas baigtas. Naudokite sync_from_server.py be --compare, kad sinchronizuotumėte.")
+    logger.info("=" * 60)
+
+
+def ensure_local_tables_from_server(server_conn, local_conn):
+    """Sukuria lokaliai trūkstamas lenteles pagal serverio schemą. Serveryje nieko nenaikina."""
+    server_cur = server_conn.cursor()
+    local_cur = local_conn.cursor()
+    server_cur.execute("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s", (LOCAL_DB_CONFIG['database'],))
+    server_tables = {row[0] for row in server_cur.fetchall()}
+    local_cur.execute("SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = %s", (LOCAL_DB_CONFIG['database'],))
+    local_tables = {row[0] for row in local_cur.fetchall()}
+    missing = server_tables - local_tables
+    for table in sorted(missing):
+        server_cur.execute(f"SHOW CREATE TABLE `{table}`")
+        row = server_cur.fetchone()
+        if not row:
+            continue
+        create_sql = row[1].replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+        try:
+            local_cur.execute(create_sql)
+            local_conn.commit()
+            logger.info(f"  Sukurta lentelė lokaliai: {table}")
+        except Exception as e:
+            logger.warning(f"  Nepavyko sukurti {table}: {e}")
+            local_conn.rollback()
+    server_cur.close()
+    local_cur.close()
 
 
 def create_backup():
@@ -326,6 +440,69 @@ def sync_table(server_conn, local_conn, table_name, pk_field='id'):
         return 0
 
 
+def sync_table_to_server(local_conn, server_conn, table_name, pk_field='id'):
+    """Į serverį prideda tik tas eilutes, kurių serveryje dar nėra (skaito iš local). Serveryje nieko nenaikina."""
+    try:
+        local_cursor = local_conn.cursor()
+        server_cursor = server_conn.cursor()
+        server_cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+        if not server_cursor.fetchone():
+            logger.info(f"  ⏭️  Praleidžiama: {table_name} (nėra serveryje)")
+            return 0
+        local_cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+        if not local_cursor.fetchone():
+            return 0
+
+        local_cursor.execute(f"SELECT * FROM `{table_name}`")
+        local_rows = local_cursor.fetchall()
+        local_columns = [desc[0] for desc in local_cursor.description]
+        if not local_rows:
+            return 0
+
+        server_cursor.execute(f"SELECT `{pk_field}` FROM `{table_name}`")
+        server_ids = {row[0] for row in server_cursor.fetchall()}
+        server_cursor.execute(f"DESCRIBE `{table_name}`")
+        server_cols = {row[0]: row for row in server_cursor.fetchall()}
+
+        added = 0
+        for row in local_rows:
+            row_dict = dict(zip(local_columns, row))
+            pk_value = row_dict.get(pk_field)
+            if pk_value is None or pk_value in server_ids:
+                continue
+            columns = []
+            values = []
+            for col in local_columns:
+                if col not in server_cols:
+                    continue
+                columns.append(col)
+                values.append(row_dict[col])
+            if not columns:
+                continue
+            placeholders = ', '.join(['%s'] * len(values))
+            col_list = ', '.join([f"`{c}`" for c in columns])
+            try:
+                server_cursor.execute(
+                    f"INSERT INTO `{table_name}` ({col_list}) VALUES ({placeholders})",
+                    values
+                )
+                server_conn.commit()
+                server_ids.add(pk_value)
+                added += 1
+            except Exception as e:
+                server_conn.rollback()
+                if 'foreign key' in str(e).lower() or 'duplicate' in str(e).lower():
+                    continue
+                raise
+        if added:
+            logger.info(f"  ✅ {table_name}: +{added} pridėta į serverį")
+        return added
+    except Exception as e:
+        logger.error(f"  ❌ Klaida {table_name}: {e}")
+        server_conn.rollback()
+        return 0
+
+
 def update_legacy_dates_from_route_stops():
     """Atnaujinti senos sistemos datas pagal RouteStop duomenis"""
     try:
@@ -408,19 +585,36 @@ def main():
         logger.error(f"❌ Nepavyko prisijungti prie DB: {e}")
         return
     
-    # 3. Sinchronizuoti modelius
-    total_synced = 0
-
     try:
-        for table_name, pk_field in SYNC_TABLES:
+        # 3. Sukurti lokaliai trūkstamas lenteles (tik skaitome iš serverio)
+        logger.info("📋 Tikrinamos lentelės – sukuriame trūkstamas lokaliai...")
+        ensure_local_tables_from_server(server_conn, local_conn)
+
+        # 4. Visų lentelių sąrašas ir PK – sinchronizuojame visas
+        all_tables = get_all_server_tables(server_conn)
+        table_pk = {}
+        for t in all_tables:
+            pk = get_pk_column(server_conn, t)
+            if pk:
+                table_pk[t] = pk
+            else:
+                logger.debug(f"  Praleidžiama {t}: nėra vieno stulpelio PK")
+
+        # Tvarka: pirmiausia ORDER_FIRST, likusios abėcėlės tvarka
+        order_first_set = set(ORDER_FIRST)
+        sorted_tables = [t for t in ORDER_FIRST if t in table_pk] + sorted(t for t in table_pk if t not in order_first_set)
+
+        total_synced = 0
+        logger.info(f"📊 Sinchronizuojamos {len(sorted_tables)} lentelės...")
+        for table_name in sorted_tables:
+            pk_field = table_pk[table_name]
             synced = sync_table(server_conn, local_conn, table_name, pk_field)
             total_synced += synced
 
-        # 4. Atnaujinti legacy datas iš route stops
         legacy_updated = update_legacy_dates_from_route_stops()
 
         logger.info("=" * 60)
-        logger.info(f"✅ Sinchronizacija baigta!")
+        logger.info("✅ Baigta – lokalė = serveris (vienodi duomenys).")
         logger.info(f"   Įrašų sinchronizuota: {total_synced}")
         logger.info(f"   Legacy datos atnaujintos: {legacy_updated}")
         logger.info("=" * 60)
@@ -435,4 +629,42 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    to_server = '--to-server' in sys.argv
+    if to_server:
+        logger.info("=" * 60)
+        logger.info("📤 Local → Server: pridedame į serverį tai, ko serveryje trūksta")
+        logger.info("=" * 60)
+        backup_file = None
+        try:
+            backup_file = create_backup()
+            if backup_file:
+                logger.info(f"💾 Atsarginė kopija: {backup_file}")
+        except Exception as e:
+            logger.warning(f"Atsarginė kopija: {e}")
+        try:
+            server_conn = get_server_connection()
+            local_conn = get_local_connection()
+        except Exception as e:
+            logger.error(f"❌ Nepavyko prisijungti: {e}")
+            sys.exit(1)
+        try:
+            all_tables = get_all_server_tables(server_conn)
+            table_pk = {}
+            for t in all_tables:
+                pk = get_pk_column(server_conn, t)
+                if pk:
+                    table_pk[t] = pk
+            order_first_set = set(ORDER_FIRST)
+            sorted_tables = [t for t in ORDER_FIRST if t in table_pk] + sorted(t for t in table_pk if t not in order_first_set)
+            total = 0
+            for table_name in sorted_tables:
+                total += sync_table_to_server(local_conn, server_conn, table_name, table_pk[table_name])
+            logger.info("=" * 60)
+            logger.info(f"✅ Baigta. Pridėta į serverį: {total} įrašų.")
+            logger.info("=" * 60)
+        finally:
+            server_conn.close()
+            local_conn.close()
+            logger.info("🔌 DB ryšiai uždaryti")
+    else:
+        main()

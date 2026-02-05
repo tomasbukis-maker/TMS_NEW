@@ -5,6 +5,9 @@ import { useAuth } from '../context/AuthContext';
 import { useModule } from '../context/ModuleContext';
 import './Navigation.css';
 
+// Absoliutus kelias nuo šaknies, kad logotipas rodytųsi visuose route (/, /login, /dashboard ir t.t.)
+const logoUrl = ((process.env.PUBLIC_URL === '.' || !process.env.PUBLIC_URL) ? '' : process.env.PUBLIC_URL) + '/logo.png';
+
 const Navigation: React.FC = () => {
   const { i18n, t } = useTranslation();
   const { logout, user } = useAuth();
@@ -17,12 +20,14 @@ const Navigation: React.FC = () => {
   const [showOrdersDropdown, setShowOrdersDropdown] = useState(false);
   const [showPaymentsDropdown, setShowPaymentsDropdown] = useState(false);
   const [showDashboardDropdown, setShowDashboardDropdown] = useState(false);
+  const [showPartnersDropdown, setShowPartnersDropdown] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const langMenuRef = useRef<HTMLDivElement>(null);
   const moduleMenuRef = useRef<HTMLDivElement>(null);
   const ordersDropdownRef = useRef<HTMLDivElement>(null);
   const paymentsDropdownRef = useRef<HTMLDivElement>(null);
   const dashboardDropdownRef = useRef<HTMLDivElement>(null);
+  const partnersDropdownRef = useRef<HTMLDivElement>(null);
 
   const changeLanguage = (lng: string) => {
     i18n.changeLanguage(lng);
@@ -49,6 +54,9 @@ const Navigation: React.FC = () => {
       if (dashboardDropdownRef.current && !dashboardDropdownRef.current.contains(event.target as Node)) {
         setShowDashboardDropdown(false);
       }
+      if (partnersDropdownRef.current && !partnersDropdownRef.current.contains(event.target as Node)) {
+        setShowPartnersDropdown(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -59,7 +67,7 @@ const Navigation: React.FC = () => {
     const currentPath = location.pathname;
     
     // Transporto modulio puslapiai
-    const transportPages = ['/orders', '/expeditions', '/invoices', '/partners', '/bank-import', '/mail'];
+    const transportPages = ['/orders', '/expeditions', '/invoices', '/partners', '/bank-import', '/mail', '/appsas'];
     // Išlaidų modulio puslapiai
     const expensePages = ['/expense-invoices', '/expense-suppliers', '/expense-categories'];
     
@@ -83,7 +91,7 @@ const Navigation: React.FC = () => {
     <nav className="navigation">
       <div className="nav-container">
         <Link to="/" className="nav-logo">
-          <img src="/logo.png" alt="Logi-Track TMS" className="nav-logo-img" />
+          <img src={logoUrl} alt="Logi-Track TMS" className="nav-logo-img" />
         </Link>
         
         {/* Dinaminiai meniu punktai */}
@@ -195,12 +203,38 @@ const Navigation: React.FC = () => {
               >
                 📬 {t('navigation.mail', 'Paštas')}
               </Link>
-              <Link 
-                to="/partners" 
-                className={`nav-link ${location.pathname === '/partners' ? 'active' : ''}`}
+              {/* Partneriai su dropdown – po jų Kontaktų priskyrimas (Appsas) */}
+              <div 
+                className="nav-dropdown-container"
+                ref={partnersDropdownRef}
+                onMouseEnter={() => setShowPartnersDropdown(true)}
+                onMouseLeave={() => setShowPartnersDropdown(false)}
               >
-                🤝 {t('navigation.partners')}
-              </Link>
+                <Link 
+                  to="/partners" 
+                  className={`nav-link ${location.pathname === '/partners' ? 'active' : ''}`}
+                >
+                  🤝 {t('navigation.partners')}
+                </Link>
+                {showPartnersDropdown && (
+                  <div className="nav-dropdown-menu">
+                    <Link 
+                      to="/partners" 
+                      className={`nav-dropdown-item ${location.pathname === '/partners' ? 'active' : ''}`}
+                      onClick={() => setShowPartnersDropdown(false)}
+                    >
+                      🤝 {t('navigation.partners')}
+                    </Link>
+                    <Link 
+                      to="/appsas" 
+                      className={`nav-dropdown-item ${location.pathname === '/appsas' ? 'active' : ''}`}
+                      onClick={() => setShowPartnersDropdown(false)}
+                    >
+                      📋 Kontaktų priskyrimas
+                    </Link>
+                  </div>
+                )}
+              </div>
             </>
           )}
 

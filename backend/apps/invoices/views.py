@@ -127,7 +127,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
     filterset_class = SalesInvoiceFilter
     search_fields = ['invoice_number', 'partner__name', 'partner__code']
     ordering_fields = ['issue_date', 'due_date', 'created_at', 'invoice_number']
-    ordering = ['-issue_date', '-invoice_number']
+    ordering = ['-invoice_number']  # didžiausias numeris viršuje
     
     def get_serializer_class(self):
         """Naudoti supaprastintą serializer'į sąrašui, pilną - detail veiksmams"""
@@ -312,15 +312,28 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             logger.warning(f"Failed to log sales invoice creation: {e}")
     
     def _calculate_orders_totals(self, orders_sequence):
-        """Apskaičiuoja bendrą sumą iš visų užsakymų"""
+        """Apskaičiuoja bendrą sumą iš visų susietų užsakymų (keli užsakymai vienoje sąskaitoje = sumų suma).
+        Kai naudojamas client_price_net – prie jo pridedamos papildomos išlaidos (other_costs)."""
         total_net = Decimal('0.00')
         order_amounts = {}
         vat_rates = []
         
         for order in orders_sequence:
-            # Prioritetas: client_price_net (jei įvestas rankiniu būdu)
-            # Jei nėra, naudoti calculated_client_price_net
-            amount = order.client_price_net or order.calculated_client_price_net or Decimal('0.00')
+            if order.client_price_net is not None:
+                base = Decimal(str(order.client_price_net))
+                other_sum = Decimal('0.00')
+                if getattr(order, 'other_costs', None) and isinstance(order.other_costs, list):
+                    for c in order.other_costs:
+                        if isinstance(c, dict) and 'amount' in c:
+                            try:
+                                other_sum += Decimal(str(c['amount']))
+                            except (ValueError, TypeError):
+                                pass
+                amount = base + other_sum
+            else:
+                amount = order.calculated_client_price_net or Decimal('0.00')
+            if amount is None:
+                amount = Decimal('0.00')
             order_amounts[order.id] = amount
             total_net += amount
             
@@ -774,6 +787,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         show_prices = display_options.get('show_prices', True)
         show_my_price = display_options.get('show_my_price', display_options.get('show_price_details', True))
         show_other_costs = display_options.get('show_other_costs', display_options.get('show_price_details', True))
+        show_loading_unloading_info = display_options.get('show_loading_unloading_info', False)
         
         has_manual = bool(invoice.manual_lines)
         
@@ -847,7 +861,9 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             
             # Gauti krovinius
             cargos = list(order.cargo_items.all().order_by('sequence_order'))
-            net_amount = amounts_map.get(order.id, order.client_price_net or order.price_net or Decimal('0.00'))
+            # Visada naudoti dabartinę užsakymo pardavimo kainą, kad peržiūroje/PDF matytųsi pakeitimai be sąskaitos perkūrimo
+            _order_net = order.client_price_net if order.client_price_net is not None else (getattr(order, 'calculated_client_price_net', None) or order.price_net)
+            net_amount = Decimal(str(_order_net)) if _order_net is not None else Decimal('0.00')
             
             if not cargos:
                 # Jei krovinių sąrašo nėra - viena eilutė (senoji logika)
@@ -884,7 +900,19 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 
                 if route_str:
                     label = 'Maršrutas' if lang == 'lt' else ('Route' if lang == 'en' else 'Маршрут')
-                    order_desc_parts.append(f"<b>{label}:</b> {route_str}")
+                    route_line = f"<b>{label}:</b> {route_str}"
+                    # Užsakymo numeris prie maršruto tik keliems užsakymams vienoje sąskaitoje
+                    if len(related_orders) > 1 and (order.order_number or order.client_order_number):
+                        parts = []
+                        if order.order_number:
+                            u_label = 'Užsakymas' if lang == 'lt' else ('Order' if lang == 'en' else 'Заказ')
+                            parts.append(f"<b>{u_label}:</b> {order.order_number}")
+                        if order.client_order_number:
+                            c_label = 'Užsakovo Nr.' if lang == 'lt' else ('Client PO' if lang == 'en' else '№ зак.')
+                            parts.append(f"<b>{c_label}:</b> {order.client_order_number}")
+                        if parts:
+                            route_line += " | " + " | ".join(parts)
+                    order_desc_parts.append(route_line)
                 
                 # Krovinio informacija iš pagrindinių laukų (fallback)
                 c_info = []
@@ -894,11 +922,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                     label = 'Krovinys' if lang == 'lt' else ('Cargo' if lang == 'en' else 'Груз')
                     order_desc_parts.append(f"• {label} ({', '.join(c_info)})")
 
-                # Užsakymo informacija (tik jei keli užsakymai sąskaitoje)
-                if len(related_orders) > 1 and order.order_date and order.order_number:
-                    date_str = order.order_date.strftime('%Y.%m.%d') if hasattr(order.order_date, 'strftime') else str(order.order_date)
+                # Užsakymo informacija (keli užsakymai – pilna eilutė; vienas – jau prie maršruto Užsakovo Nr.)
+                if len(related_orders) > 1 and (order.order_date or order.order_number):
+                    date_str = order.order_date.strftime('%Y.%m.%d') if order.order_date and hasattr(order.order_date, 'strftime') else ''
                     label = 'Užsakymas' if lang == 'lt' else ('Order' if lang == 'en' else 'Заказ')
-                    info = f"<b>{label}:</b> {date_str} / {order.order_number}"
+                    info = f"<b>{label}:</b> {date_str}{' / ' if date_str else ''}{order.order_number or ''}"
                     if order.client_order_number:
                         c_label = 'Užsakovo Nr.' if lang == 'lt' else ('PO' if lang == 'en' else '№ зак.')
                         info += f" ({c_label}: {order.client_order_number})"
@@ -920,15 +948,18 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 # JUNGIAME: Visi kroviniai vienoje eilutėje, bet atskirti vizualiai
                 order_desc_blocks = []
                 
-                # 1. Bendras antraštė (Užsakymo numeris - tik jei keli užsakymai sąskaitoje)
+                # 1. Antraštė: Užsakymo numeris tik keliems užsakymams vienoje sąskaitoje
                 header = ""
-                if len(related_orders) > 1 and order.order_date and order.order_number:
-                    date_str = order.order_date.strftime('%Y.%m.%d') if hasattr(order.order_date, 'strftime') else str(order.order_date)
-                    label = 'Užsakymas' if lang == 'lt' else ('Order' if lang == 'en' else 'Заказ')
-                    header = f"<b>{label}:</b> {date_str} / {order.order_number}"
+                if len(related_orders) > 1 and (order.order_date or order.order_number or order.client_order_number):
+                    parts = []
+                    if order.order_date or order.order_number:
+                        date_str = order.order_date.strftime('%Y.%m.%d') if order.order_date and hasattr(order.order_date, 'strftime') else ''
+                        label = 'Užsakymas' if lang == 'lt' else ('Order' if lang == 'en' else 'Заказ')
+                        parts.append(f"<b>{label}:</b> {date_str}{' / ' if date_str else ''}{order.order_number or ''}")
                     if order.client_order_number:
-                        c_label = 'Užsakovo Nr.' if lang == 'lt' else ('PO' if lang == 'en' else '№ зак.')
-                        header += f" ({c_label}: {order.client_order_number})"
+                        c_label = 'Užsakovo Nr.' if lang == 'lt' else ('Client PO' if lang == 'en' else '№ зак.')
+                        parts.append(f"<b>{c_label}:</b> {order.client_order_number}")
+                    header = " | ".join(parts)
                 
                 # 2. Kiekvieno krovinio blokas
                 for idx, cargo in enumerate(cargos):
@@ -947,7 +978,18 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                             r_parts.append(f"🛬 {s.city or s.country or '?'}{d_info}")
                         
                         label = 'Maršrutas' if lang == 'lt' else ('Route' if lang == 'en' else 'Маршрут')
-                        cargo_parts.append(f"<b>{label}:</b> {' → '.join(r_parts)}")
+                        route_line = f"<b>{label}:</b> {' → '.join(r_parts)}"
+                        if len(related_orders) > 1 and idx == 0 and (order.order_number or order.client_order_number):
+                            line_parts = []
+                            if order.order_number:
+                                u_label = 'Užsakymas' if lang == 'lt' else ('Order' if lang == 'en' else 'Заказ')
+                                line_parts.append(f"<b>{u_label}:</b> {order.order_number}")
+                            if order.client_order_number:
+                                c_label = 'Užsakovo Nr.' if lang == 'lt' else ('Client PO' if lang == 'en' else '№ зак.')
+                                line_parts.append(f"<b>{c_label}:</b> {order.client_order_number}")
+                            if line_parts:
+                                route_line += " | " + " | ".join(line_parts)
+                        cargo_parts.append(route_line)
                     elif idx == 0:
                         # Jei kroviniui nieko nepriskirta, rodom bendrą maršrutą tik pirmoje eilutėje
                         stops = list(order.route_stops.all().order_by('sequence_order'))
@@ -980,7 +1022,18 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                         
                         if route_str:
                             label = 'Maršrutas' if lang == 'lt' else ('Route' if lang == 'en' else 'Маршрут')
-                            cargo_parts.append(f"<b>{label}:</b> {route_str}")
+                            route_line = f"<b>{label}:</b> {route_str}"
+                            if len(related_orders) > 1 and (order.order_number or order.client_order_number):
+                                line_parts = []
+                                if order.order_number:
+                                    u_label = 'Užsakymas' if lang == 'lt' else ('Order' if lang == 'en' else 'Заказ')
+                                    line_parts.append(f"<b>{u_label}:</b> {order.order_number}")
+                                if order.client_order_number:
+                                    c_label = 'Užsakovo Nr.' if lang == 'lt' else ('Client PO' if lang == 'en' else '№ зак.')
+                                    line_parts.append(f"<b>{c_label}:</b> {order.client_order_number}")
+                                if line_parts:
+                                    route_line += " | " + " | ".join(line_parts)
+                            cargo_parts.append(route_line)
                     
                     # Krovinio detalės
                     c_info = []
@@ -1053,29 +1106,38 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                                 'amount_total': Decimal('0.00'),
                             })
             
-                # Pridėti kitas išlaidas (jei leidžiama rodyti kainas detaliau)
-                # PASTABA: "Mano paslaugos" eilutė niekada nerodoma HTML/PDF peržiūroje
-                if order and show_prices:
-                    # Pridėti kitas išlaidas jei leidžiama rodyti
-                    if show_other_costs and hasattr(order, 'other_costs') and order.other_costs:
-                        other_costs = order.other_costs
-                        if isinstance(other_costs, list) and len(other_costs) > 0:
-                            for cost in other_costs:
-                                if isinstance(cost, dict) and 'amount' in cost:
-                                    cost_amount = Decimal(str(cost['amount']))
-                                    cost_desc = cost.get('description', 'Kitos išlaidos')
-                                    order_vat_rate = order.vat_rate if order.vat_rate is not None else invoice.vat_rate
-                                    order_vat_rate_article = order.vat_rate_article if hasattr(order, 'vat_rate_article') and order.vat_rate_article else ''
-                                    cost_vat = cost_amount * (order_vat_rate / 100)
-                                    cost_total = cost_amount + cost_vat
-                                    invoice_items.append({
-                                        'description': f'<b>{cost_desc}</b>',
-                                        'amount_net': cost_amount,
-                                        'vat_amount': cost_vat,
-                                        'amount_total': cost_total,
-                                        'vat_rate': float(order_vat_rate),
-                                        'vat_rate_article': order_vat_rate_article,
-                                    })
+            # Pridėti kitas sąnaudas (papildomas išlaidas) – atskiros eilutės sąskaitoje (priklauso tik nuo show_other_costs)
+            other_costs_raw = getattr(order, 'other_costs', None)
+            if order and show_other_costs and other_costs_raw:
+                other_costs = other_costs_raw if isinstance(other_costs_raw, list) else []
+                if len(other_costs) > 0:
+                    for cost in other_costs:
+                        if not isinstance(cost, dict) or 'amount' not in cost:
+                            continue
+                        # Rodyti sąskaitoje tik jei pažymėta (visible_on_invoice; numatyta True)
+                        visible = cost.get('visible_on_invoice', True)
+                        if visible is False or visible is None or visible == 0 or (
+                                isinstance(visible, str) and visible.lower() in ('false', '0', 'no')):
+                            continue
+                        try:
+                            cost_amount = Decimal(str(cost['amount'] or 0))
+                        except (TypeError, ValueError):
+                            cost_amount = Decimal('0')
+                        if cost_amount < 0:
+                            continue
+                        cost_desc = (cost.get('description') or '').strip() or 'Kitos išlaidos'
+                        order_vat_rate = order.vat_rate if order.vat_rate is not None else invoice.vat_rate
+                        order_vat_rate_article = order.vat_rate_article if hasattr(order, 'vat_rate_article') and order.vat_rate_article else ''
+                        cost_vat = cost_amount * (Decimal(str(order_vat_rate)) / 100)
+                        cost_total = cost_amount + cost_vat
+                        invoice_items.append({
+                            'description': f'<b>{cost_desc}</b>',
+                            'amount_net': cost_amount,
+                            'vat_amount': cost_vat,
+                            'amount_total': cost_total,
+                            'vat_rate': float(order_vat_rate),
+                            'vat_rate_article': order_vat_rate_article,
+                        })
         
         # Jei yra rankinės eilutės – jas PRIDĖTI
         if invoice.manual_lines:
@@ -1361,6 +1423,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             'labels': labels,
             'lang': lang,
             'loading_unloading_info': loading_unloading_info,
+            'show_loading_unloading_info': show_loading_unloading_info,
         }
     
     @action(detail=True, methods=['get'])
@@ -1488,17 +1551,43 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         # NEPAŠALINTI @media print stilių - užsakymuose jie veikia gerai
         # Problema gali būti kitur, ne @media print stiliuose
         
-        # Bandyti naudoti WeasyPrint (puikus HTML/CSS palaikymas Linux serveryje)
+        base_url = request.build_absolute_uri('/')
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 1) Bandyti Playwright (Chromium) – PDF tiksliai kaip HTML peržiūroje
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                context = browser.new_context(base_url=base_url)
+                page = context.new_page()
+                page.set_content(html_string)
+                page.emulate_media(media='screen')  # kad būtų kaip peržiūroje, ne print
+                pdf_bytes = page.pdf(
+                    format='A4',
+                    margin={'top': '0', 'right': '0', 'bottom': '0', 'left': '0'},
+                    print_background=True,
+                )
+                context.close()
+                browser.close()
+            response = HttpResponse(pdf_bytes, content_type='application/pdf')
+            response['Content-Disposition'] = f'inline; filename="{invoice.invoice_number}.pdf"'
+            return response
+        except ImportError:
+            pass  # Playwright neįdiegtas – naudoti WeasyPrint
+        except Exception as e:
+            logger.warning(f"Playwright (Chromium) PDF nepavyko: {e}, naudojamas WeasyPrint")
+        
+        # 2) Bandyti naudoti WeasyPrint (puikus HTML/CSS palaikymas Linux serveryje)
         try:
             from weasyprint import HTML, CSS
             from django.conf import settings
-            import logging
-            logger = logging.getLogger(__name__)
             import os
             
             # WeasyPrint base_url - svarbu vaizdų apdorojimui
-            base_url = request.build_absolute_uri('/')
-            html_doc = HTML(string=html_string, base_url=base_url)
+            # media_type='screen' kad PDF atrodytų identiškai kaip HTML peržiūroje (ne @media print)
+            html_doc = HTML(string=html_string, base_url=base_url, media_type='screen')
             
             # CSS - tik minimalus @page, template jau turi visą reikalingą CSS
             # Neperrašome esamų stilių, tik nustatome puslapio parametrus
@@ -1595,6 +1684,69 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 content_type='application/json'
             )
     
+    def _get_invoice_pdf_bytes(self, invoice, request, lang='lt'):
+        """
+        Grąžina sąskaitos PDF baitus (panaudojama priminime kaip priedas).
+        Returns: (pdf_bytes, None) sėkmės atveju arba (None, error_msg) klaidos atveju.
+        """
+        try:
+            context = self._prepare_invoice_context(invoice, request, lang=lang)
+            html_string = render(request, 'invoices/sales_invoice.html', context).content.decode('utf-8')
+            import re
+            html_string = re.sub(r'<div[^>]*class=["\'][^"\']*action-buttons[^"\']*["\'][^>]*>.*?</div>\s*', '', html_string, flags=re.DOTALL)
+            html_string = re.sub(r'<script[^>]*>.*?</script>', '', html_string, flags=re.DOTALL | re.IGNORECASE)
+            html_string = re.sub(r'<div[^>]*id=["\']toastContainer["\'][^>]*>.*?</div>\s*', '', html_string, flags=re.DOTALL)
+            base_url = request.build_absolute_uri('/')
+            pdf_bytes = None
+            try:
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    browser = p.chromium.launch()
+                    ctx = browser.new_context(base_url=base_url)
+                    page = ctx.new_page()
+                    page.set_content(html_string)
+                    page.emulate_media(media='screen')
+                    pdf_bytes = page.pdf(format='A4', margin={'top': '0', 'right': '0', 'bottom': '0', 'left': '0'}, print_background=True)
+                    ctx.close()
+                    browser.close()
+            except (ImportError, Exception):
+                pass
+            if not pdf_bytes:
+                try:
+                    from weasyprint import HTML, CSS
+                    html_doc = HTML(string=html_string, base_url=base_url, media_type='screen')
+                    css_doc = CSS(string='@page { size: A4; margin: 0; }')
+                    pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
+                except (ImportError, OSError, Exception):
+                    pass
+            if not pdf_bytes:
+                from io import BytesIO
+                from xhtml2pdf import pisa
+                from django.conf import settings
+                from urllib.parse import urljoin
+                import os
+                result = BytesIO()
+                def link_callback(uri, rel):
+                    if uri.startswith('data:'):
+                        return uri
+                    if uri.startswith('/'):
+                        if uri.startswith(settings.MEDIA_URL):
+                            file_path = uri.replace(settings.MEDIA_URL, '')
+                            full_path = os.path.join(settings.MEDIA_ROOT, file_path)
+                            if os.path.exists(full_path):
+                                return f"file://{full_path}"
+                        return urljoin(base_url.rstrip('/'), uri)
+                    return uri
+                pdf = pisa.pisaDocument(BytesIO(html_string.encode('UTF-8')), result, encoding='UTF-8', link_callback=link_callback, show_error_as_pdf=False)
+                if not pdf.err and result.getvalue() and result.getvalue().startswith(b'%PDF'):
+                    pdf_bytes = result.getvalue()
+            if pdf_bytes and pdf_bytes.startswith(b'%PDF'):
+                return (pdf_bytes, None)
+            return (None, 'Nepavyko generuoti PDF')
+        except Exception as e:
+            logger.warning(f"Sąskaitos PDF generavimas priminimui nepavyko: {e}")
+            return (None, str(e))
+    
     @action(detail=True, methods=['post'])
     def send_email(self, request, pk=None):
         """Siunčia sąskaitos PDF el. paštu"""
@@ -1648,28 +1800,52 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             # Problema gali būti kitur, ne @media print stiliuose
             
             pdf_bytes = None
+            base_url = request.build_absolute_uri('/')
             
-            # Bandyti naudoti WeasyPrint (geresnė kokybė)
+            # 1) Bandyti Playwright (Chromium) – PDF tiksliai kaip HTML peržiūroje
             try:
-                from weasyprint import HTML, CSS
-                base_url = request.build_absolute_uri('/')
-                html_doc = HTML(string=html_string, base_url=base_url)
-                
-                pdf_css_string = """
-                    @page {
-                        size: A4;
-                        margin: 0;
-                    }
-                """
-                css_doc = CSS(string=pdf_css_string)
-                
-                pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
-                logger.info("WeasyPrint sėkmingai sugeneravo PDF el. laiške")
-                
-            except (ImportError, OSError) as e:
-                logger.warning(f"WeasyPrint nepasiekiamas el. laiške: {e}, naudojamas xhtml2pdf fallback")
+                from playwright.sync_api import sync_playwright
+                with sync_playwright() as p:
+                    browser = p.chromium.launch()
+                    context = browser.new_context(base_url=base_url)
+                    page = context.new_page()
+                    page.set_content(html_string)
+                    page.emulate_media(media='screen')
+                    pdf_bytes = page.pdf(
+                        format='A4',
+                        margin={'top': '0', 'right': '0', 'bottom': '0', 'left': '0'},
+                        print_background=True,
+                    )
+                    context.close()
+                    browser.close()
+                logger.info("Playwright (Chromium) sėkmingai sugeneravo PDF el. laiške")
+            except ImportError:
+                pass  # Playwright neįdiegtas – naudoti WeasyPrint
             except Exception as e:
-                logger.error(f"WeasyPrint klaida el. laiške: {e}, naudojamas xhtml2pdf fallback")
+                logger.warning(f"Playwright PDF el. laiške nepavyko: {e}, naudojamas WeasyPrint")
+            
+            # 2) Bandyti naudoti WeasyPrint (geresnė kokybė)
+            # media_type='screen' kad PDF atrodytų identiškai kaip HTML peržiūroje
+            if not pdf_bytes:
+                try:
+                    from weasyprint import HTML, CSS
+                    html_doc = HTML(string=html_string, base_url=base_url, media_type='screen')
+                    
+                    pdf_css_string = """
+                        @page {
+                            size: A4;
+                            margin: 0;
+                        }
+                    """
+                    css_doc = CSS(string=pdf_css_string)
+                    
+                    pdf_bytes = html_doc.write_pdf(stylesheets=[css_doc])
+                    logger.info("WeasyPrint sėkmingai sugeneravo PDF el. laiške")
+                    
+                except (ImportError, OSError) as e:
+                    logger.warning(f"WeasyPrint nepasiekiamas el. laiške: {e}, naudojamas xhtml2pdf fallback")
+                except Exception as e:
+                    logger.error(f"WeasyPrint klaida el. laiške: {e}, naudojamas xhtml2pdf fallback")
             
             # Fallback į xhtml2pdf
             if not pdf_bytes:
@@ -1777,15 +1953,50 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             if not use_tls and config.smtp_port in (465, 587):
                 use_ssl = config.smtp_port == 465
             
-            # Siųsti el. laišką naudojant šabloną
-            # Paruošti context su sąskaitos duomenimis
+            # Siųsti el. laišką naudojant šabloną (sumos, užsakymo kintamieji, kitos neapmokėtos sąskaitos)
+            from apps.settings.format_utils import format_money
+            order = getattr(invoice, 'related_order', None) or (invoice.related_orders.first() if invoice.related_orders.exists() else None)
+            today = timezone.now().date()
+            overdue_days = max(0, (today - invoice.due_date).days) if invoice.due_date and invoice.due_date < today else 0
+            other_invoices_text = ''
+            if invoice.partner:
+                other_invoices = SalesInvoice.objects.filter(
+                    partner=invoice.partner,
+                    payment_status__in=['unpaid', 'overdue', 'partially_paid']
+                ).exclude(id=invoice.id).order_by('due_date', 'invoice_number')
+                lines = []
+                for other_inv in other_invoices:
+                    if not other_inv.due_date:
+                        continue
+                    days_until = (other_inv.due_date - today).days
+                    if days_until < 0:
+                        status_text = f"Vėluoja {abs(days_until)} d."
+                    elif days_until == 0:
+                        status_text = "Terminas šiandien!"
+                    else:
+                        status_text = f"Liko {days_until} d."
+                    lines.append(f"{other_inv.invoice_number} - {status_text}")
+                other_invoices_text = '\n'.join(lines)
             invoice_context = {
                 'invoice_number': invoice.invoice_number or 'N/A',
                 'issue_date': invoice.issue_date.strftime('%Y-%m-%d') if invoice.issue_date else 'N/A',
                 'due_date': invoice.due_date.strftime('%Y-%m-%d') if invoice.due_date else 'N/A',
                 'partner_name': invoice.partner.name if invoice.partner else '',
-                'amount': str(invoice.amount_total),
-                'amount_total': str(invoice.amount_total),
+                'amount': format_money(invoice.amount_total),
+                'amount_net': format_money(invoice.amount_net or 0),
+                'amount_total': format_money(invoice.amount_total),
+                'vat_rate': str(invoice.vat_rate) if invoice.vat_rate else '0',
+                'payment_status': invoice.get_payment_status_display() if hasattr(invoice, 'get_payment_status_display') else '',
+                'overdue_days': str(overdue_days),
+                'other_unpaid_invoices': other_invoices_text,
+                'order_number': order.order_number if order else '',
+                'client_order_number': order.client_order_number if order and getattr(order, 'client_order_number', None) else '',
+                'route_from': order.route_from if order else '',
+                'route_to': order.route_to if order else '',
+                'loading_date': order.loading_date.strftime('%Y-%m-%d') if order and order.loading_date else '',
+                'unloading_date': order.unloading_date.strftime('%Y-%m-%d') if order and order.unloading_date else '',
+                'order_date': order.order_date.strftime('%Y-%m-%d') if order and order.order_date else '',
+                'manager_name': (f"{order.manager.first_name or ''} {order.manager.last_name or ''}".strip() or order.manager.username) if order and order.manager else '',
             }
             
             # Renderinti šabloną (naudojant vieną kartą visiems gavėjams)
@@ -1831,11 +2042,13 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                         filename = f"saskaita_{invoice.invoice_number}.pdf"
                         email_msg.attach(filename, pdf_bytes, 'application/pdf')
                         
-                        # Siųsti su istorijos įrašymu
+                        # Siųsti su istorijos įrašymu (related_order_id – kad užsakymo „Susiję laiškai“ rodytų šį siuntimą)
                         try:
+                            order_id = getattr(invoice, 'related_order_id', None) or (invoice.related_orders.first().id if invoice.related_orders.exists() else None)
                             result = send_email_message_with_logging(
                                 email_message=email_msg,
                                 email_type='invoice',
+                                related_order_id=order_id,
                                 related_invoice_id=invoice.id,
                                 related_partner_id=invoice.partner.id if invoice.partner else None,
                                 sent_by=request.user if hasattr(request, 'user') and request.user.is_authenticated else None,
@@ -1908,7 +2121,8 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         
         Body (optional):
         {
-            "reminder_type": "due_soon" | "unpaid" | "overdue"  // Jei nenurodyta, nustatoma automatiškai
+            "reminder_type": "due_soon" | "unpaid" | "overdue",  // Jei nenurodyta, nustatoma automatiškai
+            "contact_id": int  // Partnerio kontakto ID, į kurį siųsti (optional)
         }
         """
         invoice = self.get_object()
@@ -1933,25 +2147,47 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 {'success': False, 'error': 'Sąskaita neturi susieto partnerio'},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # Patikrinti, ar partneris turi el. pašto adresą (tik jei testavimo režimas neįjungtas)
-        # Jei testavimo režimas įjungtas, leisti siųsti net jei nėra email (naudoti testavimo adresą)
+
+        contact_id = request.data.get('contact_id')
+        # Jei nurodytas contact_id, tikrinti to kontakto el. paštą; kitaip – contact_person
         if not notification_settings.email_test_mode:
-            has_email = (
-                invoice.partner.contact_person and 
-                invoice.partner.contact_person.email and
-                invoice.partner.contact_person.email.strip() and
-                '@' in invoice.partner.contact_person.email.strip()
-            )
-            if not has_email:
-                return Response(
-                    {'success': False, 'error': 'Partneris neturi el. pašto adreso. Įjunkite testavimo režimą nustatymuose arba pridėkite el. pašto adresą partnerio kontaktiniam asmeniui.'},
-                    status=status.HTTP_400_BAD_REQUEST
+            if contact_id:
+                from apps.partners.models import Contact
+                contact = Contact.objects.filter(pk=contact_id, partner=invoice.partner).first()
+                email_ok = (
+                    contact and contact.email and
+                    (contact.email or '').strip() and
+                    '@' in (contact.email or '').strip()
                 )
+                if not email_ok:
+                    return Response(
+                        {'success': False, 'error': 'Pasirinktas kontaktas neturi el. pašto adreso.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                has_email = (
+                    invoice.partner.contact_person and
+                    invoice.partner.contact_person.email and
+                    invoice.partner.contact_person.email.strip() and
+                    '@' in invoice.partner.contact_person.email.strip()
+                )
+                if not has_email:
+                    return Response(
+                        {'success': False, 'error': 'Partneris neturi el. pašto adreso. Įjunkite testavimo režimą nustatymuose arba pridėkite el. pašto adresą partnerio kontaktiniam asmeniui.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
         
         try:
             sent_by = request.user if hasattr(request, 'user') and request.user.is_authenticated else None
-            result = send_debtor_reminder_email(invoice, sent_by=sent_by, reminder_type=reminder_type)
+            contact_id = request.data.get('contact_id')
+            pdf_bytes = None
+            try:
+                pdf_bytes, _ = self._get_invoice_pdf_bytes(invoice, request, 'lt')
+            except Exception as e:
+                logger.warning(f"Priminimas bus siunčiamas be PDF priedo: {e}")
+            result = send_debtor_reminder_email(
+                invoice, sent_by=sent_by, reminder_type=reminder_type, contact_id=contact_id, pdf_bytes=pdf_bytes
+            )
             
             if result.get('success'):
                 return Response({
@@ -2034,8 +2270,9 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
             except (MailAttachment.DoesNotExist, ValueError, TypeError) as e:
                 logger.warning(f'Failed to link attachment {source_attachment_id} to purchase invoice {invoice.id}: {e}')
         
-        # Atnaujinti OrderCarrier.invoice_received flag'ą, jei yra susijęs užsakymas ir partner
+        # Atnaujinti OrderCarrier.invoice_received ir payment_status
         self._update_carrier_invoice_received(invoice)
+        self._sync_carrier_payment_status(invoice)
         
         # Siųsti pranešimą vadybininkui, jei partneris turi įjungtą pranešimą
         try:
@@ -2066,14 +2303,19 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
         """
         Trinant pirkimo sąskaitą:
         1. Pašalinti ryšį su mail attachment (jei yra)
-        2. Atnaujinti OrderCarrier.invoice_received = False, jei nėra kitų sąskaitų su tuo pačiu related_order ir partner
+        2. Atnaujinti OrderCarrier.invoice_received = False kiekvienam užsakymui+partneriui,
+           jei nėra kitų sąskaitų susietų su tuo užsakymu (per related_order arba related_orders).
         """
         from apps.orders.models import OrderCarrier
         from apps.mail.models import MailAttachment
         
-        # Saugoti informaciją prieš trinant
-        invoice_id = instance.id
-        related_order = instance.related_order
+        # Prieš trinant surinkti visus užsakymus (ir iš FK, ir iš M2M)
+        orders_to_check = []
+        if instance.related_order:
+            orders_to_check.append(instance.related_order)
+        if instance.related_orders.exists():
+            orders_to_check.extend(instance.related_orders.all())
+        orders_to_check = list(set(orders_to_check))
         partner = instance.partner
         
         # Pašalinti ryšį su mail attachment (jei yra)
@@ -2089,38 +2331,33 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
         # Iškviesti standartinį trinimą
         super().perform_destroy(instance)
         
-        # Jei sąskaita buvo susijusi su užsakymu ir partner, patikrinti ar reikia atnaujinti OrderCarrier
-        if related_order and partner:
-            # Rasti OrderCarrier objektus su tuo pačiu order ir partner
-            order_carriers = OrderCarrier.objects.filter(
-                order=related_order,
-                partner=partner
-            )
-            
-            # Patikrinti ar yra kitų PurchaseInvoice su tuo pačiu order ir partner
-            # Dabar instance jau ištrintas, todėl nereikia exclude(id=invoice_id)
+        # Kiekvienam užsakymui, su kuriuo buvo susijusi sąskaita: jei nebėra jokių sąskaitų
+        # su tuo order+partner, nustatyti OrderCarrier.invoice_received = False
+        if not partner:
+            return
+        for order in orders_to_check:
+            order_carriers = OrderCarrier.objects.filter(order=order, partner=partner)
             remaining_invoices = PurchaseInvoice.objects.filter(
-                related_order=related_order,
                 partner=partner
+            ).filter(
+                models.Q(related_order=order) | models.Q(related_orders__id=order.id)
             )
-            
-            # Jei nėra kitų sąskaitų, atnaujinti invoice_received = False visiems OrderCarrier
-            # su tuo pačiu order ir partner, kurie turi invoice_received = True
             if not remaining_invoices.exists():
-                # Atnaujinti visus OrderCarrier su invoice_received = True
                 order_carriers.filter(invoice_received=True).update(
                     invoice_received=False,
+                    invoice_received_date=None,
                     updated_at=timezone.now()
                 )
     
     def perform_update(self, serializer):
-        """Atnaujinti PurchaseInvoice ir sinchronizuoti OrderCarrier.invoice_received"""
-        # Patikrinti, ar keičiasi payment_status į 'unpaid' arba ar yra nauja sąskaita
+        """Atnaujinti PurchaseInvoice, sinchronizuoti OrderCarrier.invoice_received ir payment_status"""
         old_instance = self.get_object()
         purchase_invoice = serializer.save()
         
         # Atnaujinti OrderCarrier.invoice_received flag'ą
         self._update_carrier_invoice_received(purchase_invoice)
+        # Sinchronizuoti OrderCarrier.payment_status su pirkimo sąskaitų būsena (kad užsakymų sąraše rodytų „Apmokėta“)
+        self._sync_carrier_payment_status(purchase_invoice)
         
         # Siųsti pranešimą vadybininkui, jei:
         # 1. Partneris turi įjungtą pranešimą
@@ -2180,6 +2417,63 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
                 # Jei nėra PurchaseInvoice, bet OrderCarrier turi invoice_received=True,
                 # palikti kaip yra (gali būti gauta per dokumentus)
                 pass
+    
+    def _sync_carrier_payment_status(self, purchase_invoice):
+        """Kai pirkimo sąskaitos payment_status keičiamas (pvz. pažymima apmokėta), atnaujinti OrderCarrier.payment_status,
+        kad užsakymų sąraše vežėjo būsena rodytų teisingai (žalia varnelė)."""
+        from apps.orders.models import OrderCarrier
+        
+        partner = purchase_invoice.partner
+        if not partner:
+            return
+        orders_to_check = []
+        if purchase_invoice.related_order:
+            orders_to_check.append(purchase_invoice.related_order)
+        if purchase_invoice.related_orders.exists():
+            orders_to_check.extend(purchase_invoice.related_orders.all())
+        orders_to_check = list(set(orders_to_check))
+        for order in orders_to_check:
+            order_carriers = OrderCarrier.objects.filter(order=order, partner=partner)
+            if not order_carriers.exists():
+                continue
+            # Visos šio order+partner pirkimo sąskaitos
+            invoices = list(PurchaseInvoice.objects.filter(
+                partner=partner
+            ).filter(
+                models.Q(related_order=order) | models.Q(related_orders__id=order.id)
+            ))
+            if not invoices:
+                continue
+            paid_count = sum(1 for i in invoices if getattr(i, 'payment_status', None) == 'paid')
+            partially_count = sum(1 for i in invoices if getattr(i, 'payment_status', None) == 'partially_paid')
+            total = len(invoices)
+            if paid_count == total:
+                new_status = 'paid'
+                last_paid = max(
+                    (i for i in invoices if getattr(i, 'payment_date', None)),
+                    key=lambda i: i.payment_date,
+                    default=None
+                )
+                new_date = last_paid.payment_date if last_paid else None
+            elif paid_count > 0 or partially_count > 0:
+                new_status = 'partially_paid'
+                new_date = None
+            else:
+                new_status = 'not_paid'
+                new_date = None
+            for c in order_carriers:
+                uf = ['updated_at']
+                if c.payment_status != new_status:
+                    c.payment_status = new_status
+                    uf.append('payment_status')
+                if new_date is not None and c.payment_date != new_date:
+                    c.payment_date = new_date
+                    uf.append('payment_date')
+                elif new_date is None and c.payment_date is not None and new_status != 'paid':
+                    c.payment_date = None
+                    uf.append('payment_date')
+                if len(uf) > 1:
+                    c.save(update_fields=uf)
     
     @action(detail=True, methods=['post'])
     def send_email(self, request, pk=None):

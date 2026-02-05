@@ -14,6 +14,12 @@
             margin: 0;
             padding: 0;
             font-family: verdana, arial, helvetica, sans-serif;
+            font-size: 12px;
+        }
+        hr {
+            border: none;
+            border-top: 1px solid #000;
+            margin: 12px 0;
         }
         .page {
             width: 210mm;
@@ -182,15 +188,42 @@
             color: #000000;
         }
 
+        /* Lentelių rėmeliai ir aukštis – artimesnis HTML peržiūrai */
+        .invoice-items-table {
+            border-collapse: collapse;
+            border: 1px solid #000;
+        }
+        .invoice-items-table td,
+        .invoice-items-table th {
+            border: 1px solid #000;
+            padding: 10px 12px;
+            line-height: 1.45;
+            vertical-align: top;
+        }
+        .invoice-items-table .forma {
+            padding: 10px 12px;
+            line-height: 1.45;
+        }
+        .summary-block {
+            margin-top: 14px;
+        }
+        .loading-unloading-table {
+            border-collapse: collapse;
+            border: 1px solid #000;
+        }
+        .loading-unloading-table td,
+        .loading-unloading-table th {
+            border: 1px solid #000;
+        }
+
         .signatures-container {
             margin-top: 50px;
-            display: flex;
-            justify-content: space-between;
             width: 100%;
         }
 
         .signature-box {
             width: 45%;
+            vertical-align: top;
         }
 
         .signature-label {
@@ -201,10 +234,17 @@
 
         .signature-line-container {
             border-top: 1px solid #000;
-            display: flex;
-            justify-content: space-between;
             padding-top: 2px;
         }
+
+        .signature-line-container table {
+            width: 100%;
+            border: 0;
+            border-collapse: collapse;
+        }
+
+        .signature-line-container .sig-left { text-align: left; }
+        .signature-line-container .sig-right { text-align: right; }
 
         .signature-sub-label {
             font-size: 8px;
@@ -285,43 +325,47 @@
                 {% endif %}
                 <hr>
 
-                <div style="display: table; width: 100%; border-collapse: collapse; border: 1px solid #000;">
-                    <div style="display: table-row; background: #f0f0f0;">
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 5%;">Nr.</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 45%;">{{ labels.description }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 13%;">{{ labels.amount }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 10%;">{{ labels.vat_rate }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 12%;">PVM suma</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center; width: 15%;">{{ labels.total }}</div>
-                    </div>
+                <table class="invoice-items-table" border="1" cellspacing="0" cellpadding="5" width="100%" style="margin-top: 10px;">
+                    <tr style="background: #f0f0f0;">
+                        <td class="tmp_table_head" style="text-align: center; width: 5%;">Nr.</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 45%;">{{ labels.description }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 15%;">{{ labels.amount }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 10%;">{{ labels.vat_rate }}</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 12%;">PVM suma</td>
+                        <td class="tmp_table_head" style="text-align: center; width: 13%;">{{ labels.total }}</td>
+                    </tr>
                     {% for item in invoice_items %}
-                    <div style="display: table-row;">
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center;">{{ forloop.counter }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px;">{{ item.description|safe }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: right;">{{ item.amount_net|floatformat:2 }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: center;">{{ item.vat_rate|floatformat:0 }}%</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: right;">{{ item.vat_amount|floatformat:2 }}</div>
-                        <div class="forma" style="display: table-cell; border: 1px solid #000; padding: 4px; text-align: right;">{{ item.amount_total|floatformat:2 }}</div>
-                    </div>
+                    <tr>
+                        <td class="forma" style="text-align: center;">{{ forloop.counter }}</td>
+                        <td class="forma">{{ item.description|safe }}</td>
+                        <td class="forma" style="text-align: right;">{{ item.amount_net|floatformat:2 }}</td>
+                        <td class="forma" style="text-align: center;">{{ item.vat_rate|floatformat:0 }}%</td>
+                        <td class="forma" style="text-align: right;">{{ item.vat_amount|floatformat:2 }}</td>
+                        <td class="forma" style="text-align: right;">{{ item.amount_total|floatformat:2 }}</td>
+                    </tr>
                     {% endfor %}
-                </div>
+                </table>
 
-                <div style="margin-top: 10px; display: flex; justify-content: flex-end;">
-                    <table border="0" cellspacing="0" cellpadding="2" style="width: 300px; border-collapse: collapse;">
-                        <tr>
-                            <td class="forma" style="text-align: right;">Suma be PVM:</td>
-                            <td class="forma" style="text-align: right; width: 100px;"><b>{{ invoice.amount_net|floatformat:2 }} EUR</b></td>
-                        </tr>
-                        <tr>
-                            <td class="forma" style="text-align: right;">PVM suma:</td>
-                            <td class="forma" style="text-align: right;"><b>{{ vat_amount|floatformat:2 }} EUR</b></td>
-                        </tr>
-                        <tr style="border-top: 1px solid #000;">
-                            <td class="forma" style="text-align: right; font-size: 12px;"><b>{{ labels.total_eur }}:</b></td>
-                            <td class="forma" style="text-align: right; font-size: 12px;"><b>{{ invoice.amount_total|floatformat:2 }} EUR</b></td>
-                        </tr>
-                    </table>
-                </div>
+                <table border="0" cellspacing="0" cellpadding="0" width="100%" class="summary-block">
+                    <tr>
+                        <td style="text-align: right;">
+                            <table border="0" cellspacing="0" cellpadding="2" style="width: 300px; border-collapse: collapse; margin-left: auto;">
+                                <tr>
+                                    <td class="forma" style="text-align: right;">Suma be PVM:</td>
+                                    <td class="forma" style="text-align: right; width: 100px;"><b>{{ invoice.amount_net|floatformat:2 }} EUR</b></td>
+                                </tr>
+                                <tr>
+                                    <td class="forma" style="text-align: right;">PVM suma:</td>
+                                    <td class="forma" style="text-align: right;"><b>{{ vat_amount|floatformat:2 }} EUR</b></td>
+                                </tr>
+                                <tr style="border-top: 1px solid #000;">
+                                    <td class="forma" style="text-align: right; font-size: 12px;"><b>{{ labels.total_eur }}</b></td>
+                                    <td class="forma" style="text-align: right; font-size: 12px;"><b>{{ invoice.amount_total|floatformat:2 }} EUR</b></td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
 
                 {% if vat_rate_articles %}
                 <div style="margin-top: 5px; font-size: 10px; color: #000; font-weight: bold;">
@@ -339,40 +383,40 @@
                     <b>{{ labels.due_date }} {{ invoice.due_date|date:"Y.m.d" }}</b>
                 </div>
 
-                {% if loading_unloading_info %}
+                {% if show_loading_unloading_info and loading_unloading_info %}
                 <div style="margin-top: 10px; padding: 3px 4px; background-color: #f9f9f9; border: 1px solid #ddd; border-radius: 2px;">
                     <div style="font-size: 9px; font-weight: bold; margin-bottom: 3px; color: #000;">
                         {% if lang == 'en' %}Loading/Unloading Information{% elif lang == 'ru' %}Информация о погрузке/разгрузке{% else %}Pakrovimo/Iškrovimo informacija{% endif %}
                     </div>
-                    <div style="display: table; width: 100%; border-collapse: collapse; font-size: 8px;">
-                        <div style="display: table-row; background: #f0f0f0; font-weight: bold;">
-                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; width: 20%; text-align: center;">
+                    <table class="loading-unloading-table" border="1" cellspacing="0" cellpadding="2" width="100%" style="font-size: 8px;">
+                        <tr style="background: #f0f0f0; font-weight: bold;">
+                            <td style="padding: 2px 4px; text-align: center; width: 20%;">
                                 {% if lang == 'en' %}Order{% elif lang == 'ru' %}Заказ{% else %}Užsakymas{% endif %}
-                            </div>
-                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; width: 40%; text-align: center;">
+                            </td>
+                            <td style="padding: 2px 4px; text-align: center; width: 40%;">
                                 {% if lang == 'en' %}Loading{% elif lang == 'ru' %}Погрузка{% else %}Pakrovimas{% endif %}
-                            </div>
-                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; width: 40%; text-align: center;">
+                            </td>
+                            <td style="padding: 2px 4px; text-align: center; width: 40%;">
                                 {% if lang == 'en' %}Unloading{% elif lang == 'ru' %}Разгрузка{% else %}Iškrovimas{% endif %}
-                            </div>
-                        </div>
+                            </td>
+                        </tr>
                         {% for order_info in loading_unloading_info %}
-                        <div style="display: table-row;">
-                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; vertical-align: top; font-size: 7px; line-height: 1.2;">
+                        <tr>
+                            <td style="padding: 2px 4px; vertical-align: top; font-size: 7px; line-height: 1.2;">
                                 {% if order_info.client_order_number %}
                                 <div style="margin-bottom: 2px;"><strong>{% if lang == 'en' %}Client No.{% elif lang == 'ru' %}Клиент №{% else %}Kliento nr.{% endif %}:</strong> {{ order_info.client_order_number }}</div>
                                 {% endif %}
                                 {% if order_info.order_number %}
                                 <div>
-                                    <strong>{% if lang == 'en' %}Carrier No.{% elif lang == 'ru' %}Перевозчик №{% else %}Vežėjo nr.{% endif %}:</strong> 
+                                    <strong>{% if lang == 'en' %}Carrier No.{% elif lang == 'ru' %}Перевозчик №{% else %}Vežėjo nr.{% endif %}:</strong>
                                     {{ order_info.order_number }}{% if order_info.expedition_number %} ({{ order_info.expedition_number }}){% endif %}
                                 </div>
                                 {% endif %}
                                 {% if not order_info.client_order_number and not order_info.order_number %}
                                 <div style="color: #999; font-style: italic;">—</div>
                                 {% endif %}
-                            </div>
-                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; vertical-align: top;">
+                            </td>
+                            <td style="padding: 2px 4px; vertical-align: top;">
                                 {% if order_info.loading.address or order_info.loading.sender or order_info.loading.date %}
                                     {% if order_info.loading.sender %}
                                     <div style="font-size: 7px; color: #333; line-height: 1.2;">
@@ -394,8 +438,8 @@
                                         {% if lang == 'en' %}Not specified{% elif lang == 'ru' %}Не указано{% else %}Nenurodyta{% endif %}
                                     </div>
                                 {% endif %}
-                            </div>
-                            <div style="display: table-cell; padding: 2px 4px; border: 1px solid #ddd; vertical-align: top;">
+                            </td>
+                            <td style="padding: 2px 4px; vertical-align: top;">
                                 {% if order_info.unloading.address or order_info.unloading.receiver or order_info.unloading.date %}
                                     {% if order_info.unloading.receiver %}
                                     <div style="font-size: 7px; color: #333; line-height: 1.2;">
@@ -417,44 +461,47 @@
                                         {% if lang == 'en' %}Not specified{% elif lang == 'ru' %}Не указано{% else %}Nenurodyta{% endif %}
                                     </div>
                                 {% endif %}
-                            </div>
-                        </div>
+                            </td>
+                        </tr>
                         {% endfor %}
-                    </div>
+                    </table>
                 </div>
                 {% endif %}
 
-                <div class="signatures-container">
-                    <!-- Seller (Issued by) -->
-                    <div class="signature-box">
-                        <div class="signature-label">{{ labels.issued_by }}</div>
-                        <div style="margin-bottom: 5px;">
-                            {{ invoice_issuer|default:"" }}
-                        </div>
-                        {% if signature_url %}
-                        <div style="height: 40px;">
-                            <img src="{{ signature_url }}" style="max-height: 40px;">
-                        </div>
-                        {% else %}
-                        <div style="height: 40px;"></div>
-                        {% endif %}
-                        <div class="signature-line-container">
-                            <span class="signature-sub-label">({{ labels.signature }}, {{ labels.name_surname }})</span>
-                            <span class="signature-sub-label">{{ labels.date_label }}</span>
-                        </div>
-                    </div>
-
-                    <!-- Buyer (Received by) -->
-                    <div class="signature-box">
-                        <div class="signature-label">{{ labels.received_by }}</div>
-                        <div style="height: 20px;"></div>
-                        <div style="height: 40px;"></div>
-                        <div class="signature-line-container">
-                            <span class="signature-sub-label">({{ labels.signature }}, {{ labels.name_surname }})</span>
-                            <span class="signature-sub-label">{{ labels.date_label }}</span>
-                        </div>
-                    </div>
-                </div>
+                <table class="signatures-container" border="0" cellspacing="0" cellpadding="0" width="100%">
+                    <tr>
+                        <td class="signature-box" width="45%">
+                            <div class="signature-label">{{ labels.issued_by }}</div>
+                            <div style="margin-bottom: 5px;">
+                                {{ invoice_issuer|default:"" }}
+                            </div>
+                            {% if signature_url %}
+                            <div style="height: 40px;">
+                                <img src="{{ signature_url }}" style="max-height: 40px;">
+                            </div>
+                            {% else %}
+                            <div style="height: 40px;"></div>
+                            {% endif %}
+                            <div class="signature-line-container">
+                                <table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>
+                                    <td class="sig-left signature-sub-label">({{ labels.signature }}, {{ labels.name_surname }})</td>
+                                    <td class="sig-right signature-sub-label">{{ labels.date_label }}</td>
+                                </tr></table>
+                            </div>
+                        </td>
+                        <td class="signature-box" width="45%">
+                            <div class="signature-label">{{ labels.received_by }}</div>
+                            <div style="height: 20px;"></div>
+                            <div style="height: 40px;"></div>
+                            <div class="signature-line-container">
+                                <table border="0" cellspacing="0" cellpadding="0" width="100%"><tr>
+                                    <td class="sig-left signature-sub-label">({{ labels.signature }}, {{ labels.name_surname }})</td>
+                                    <td class="sig-right signature-sub-label">{{ labels.date_label }}</td>
+                                </tr></table>
+                            </div>
+                        </td>
+                    </tr>
+                </table>
             </div>
         </div>
     </div>

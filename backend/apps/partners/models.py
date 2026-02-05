@@ -107,10 +107,23 @@ class Partner(models.Model):
     )
     is_supplier = models.BooleanField(default=False, db_index=True, verbose_name=_('Tiekėjas'))
     is_client = models.BooleanField(default=False, db_index=True, verbose_name=_('Klientas'))
+    has_code_errors = models.BooleanField(
+        default=False,
+        db_index=True,
+        verbose_name=_('Kodo klaidos'),
+        help_text=_('Įmonės arba PVM kodas neteisingo formato – rodoma tik su filtru „Su klaidomis“.')
+    )
     notes = models.TextField(blank=True, verbose_name=_('Pastabos'))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    def save(self, *args, **kwargs):
+        from .utils import is_valid_company_code, is_valid_vat_code
+        self.has_code_errors = not (
+            is_valid_company_code(self.code or '') and is_valid_vat_code(self.vat_code or '')
+        )
+        super().save(*args, **kwargs)
+
     class Meta:
         db_table = 'partners'
         verbose_name = _('Partneris')
@@ -120,6 +133,7 @@ class Partner(models.Model):
             models.Index(fields=['code']),
             models.Index(fields=['status']),
             models.Index(fields=['is_supplier', 'is_client']),
+            models.Index(fields=['has_code_errors']),
         ]
     
     def __str__(self):

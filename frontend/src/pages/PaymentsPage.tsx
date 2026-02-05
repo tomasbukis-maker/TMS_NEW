@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '../services/api';
 import PaymentService from '../services/paymentService';
+import { formatMoney } from '../utils/formatMoney';
 import HTMLPreviewModal, { HTMLPreview } from '../components/common/HTMLPreviewModal';
 import AttachmentPreviewModal, { AttachmentPreview } from '../components/common/AttachmentPreviewModal';
 import './PaymentsPage.css';
@@ -32,6 +33,15 @@ interface Invoice {
   payments: Payment[];
   invoice_file?: string | null;
   invoice_file_url?: string | null;
+}
+
+interface PartnerContact {
+  id: number;
+  name?: string;
+  first_name?: string;
+  last_name?: string;
+  email: string;
+  phone?: string;
 }
 
 const PaymentsPage: React.FC = () => {
@@ -71,6 +81,13 @@ const PaymentsPage: React.FC = () => {
   const [htmlPreviewLang, setHtmlPreviewLang] = useState<string>('lt');
   const [previewInvoiceId, setPreviewInvoiceId] = useState<number | null>(null);
   const [previewInvoiceType, setPreviewInvoiceType] = useState<'sales' | 'purchase' | null>(null);
+
+  // Priminimo siuntimas: pasirinkti kontaktą
+  const [reminderModal, setReminderModal] = useState<{ invoice: Invoice } | null>(null);
+  const [reminderContacts, setReminderContacts] = useState<PartnerContact[]>([]);
+  const [reminderContactLoading, setReminderContactLoading] = useState(false);
+  const [selectedReminderContactId, setSelectedReminderContactId] = useState<number | null>(null);
+  const [reminderSending, setReminderSending] = useState(false);
 
   // Kai keičiasi tab'as, grįžti į pirmą puslapį
   useEffect(() => {
@@ -138,14 +155,7 @@ const PaymentsPage: React.FC = () => {
     };
   }, [fetchInvoices, fetchStatistics]);
 
-  const formatCurrency = (amount: string) => {
-    const num = parseFloat(amount);
-    return new Intl.NumberFormat('lt-LT', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-    }).format(num);
-  };
+  const formatCurrency = (amount: string | number) => formatMoney(amount);
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
@@ -272,6 +282,73 @@ const PaymentsPage: React.FC = () => {
       notes: ''
     });
     setEditingPayment({ invoiceId: invoice.id, invoiceType });
+  };
+
+  // Priminimo tipas pagal sąskaitos statusą ir datą (tik pardavimo sąskaitoms)
+  const getReminderType = (invoice: Invoice): 'due_soon' | 'unpaid' | 'overdue' | null => {
+    if (invoice.payment_status === 'paid') return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (!invoice.due_date) {
+      if (invoice.payment_status === 'overdue' || invoice.payment_status === 'partially_paid') return 'overdue';
+      return 'unpaid';
+    }
+    const dueDate = new Date(invoice.due_date);
+    dueDate.setHours(0, 0, 0, 0);
+    const daysUntilDue = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysUntilDue < 0) return 'overdue';
+    if (daysUntilDue > 0 && daysUntilDue <= 3 && invoice.payment_status === 'unpaid') return 'due_soon';
+    if (invoice.payment_status === 'unpaid') return 'unpaid';
+    if (invoice.payment_status === 'overdue' || invoice.payment_status === 'partially_paid') return 'overdue';
+    return 'unpaid';
+  };
+
+  const openReminderModal = async (invoice: Invoice) => {
+    setReminderModal({ invoice });
+    setSelectedReminderContactId(null);
+    setReminderContacts([]);
+    setReminderContactLoading(true);
+    try {
+      const res = await api.get('/partners/contacts/', { params: { partner: invoice.partner.id } });
+      const list = Array.isArray(res.data.results) ? res.data.results : (Array.isArray(res.data) ? res.data : []);
+      setReminderContacts(list.filter((c: PartnerContact) => c.email && c.email.trim()));
+    } catch (_) {
+      setReminderContacts([]);
+    } finally {
+      setReminderContactLoading(false);
+    }
+  };
+
+  const handleSendReminderFromModal = async () => {
+    if (!reminderModal || !selectedReminderContactId) {
+      alert('Pasirinkite kontaktą, į kurį siųsti priminimą.');
+      return;
+    }
+    const { invoice } = reminderModal;
+    const reminderType = getReminderType(invoice);
+    if (!reminderType) {
+      alert('Negalima nustatyti priminimo tipo (sąskaita gali būti apmokėta).');
+      return;
+    }
+    setReminderSending(true);
+    try {
+      const response = await api.post(`/invoices/sales/${invoice.id}/send_reminder/`, {
+        reminder_type: reminderType,
+        contact_id: selectedReminderContactId
+      });
+      if (response.data.success) {
+        alert('Priminimas sėkmingai išsiųstas.');
+        setReminderModal(null);
+        setSelectedReminderContactId(null);
+      } else {
+        alert(response.data.error || 'Nepavyko išsiųsti priminimo.');
+      }
+    } catch (err: any) {
+      const msg = err.response?.data?.error || err.response?.data?.detail || err.message || 'Nepavyko išsiųsti priminimo';
+      alert(msg);
+    } finally {
+      setReminderSending(false);
+    }
   };
 
   const invoices = activeTab === 'sales' ? salesInvoices : purchaseInvoices;
@@ -903,7 +980,7 @@ const PaymentsPage: React.FC = () => {
             alignItems: 'center'
           }}>
             <div style={{ fontSize: '13px', fontWeight: '600', color: '#004085' }}>
-              ✓ Pažymėta: {selectedInvoices.size} sąskaitos | Likutis: {formatCurrency(selectedTotal.toFixed(2))}
+              ✓ Pažymėta: {selectedInvoices.size} sąskaitos | Likutis: {formatCurrency(selectedTotal)}
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
@@ -1139,6 +1216,25 @@ const PaymentsPage: React.FC = () => {
                   >
                     Pridėti
                   </button>
+                  {activeTab === 'sales' && !isPaid && (
+                    <button
+                      onClick={() => openReminderModal(invoice)}
+                      style={{
+                        padding: '6px 10px',
+                        backgroundColor: '#6f42c1',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '16px',
+                        lineHeight: '1.4',
+                        minWidth: '36px'
+                      }}
+                      title="Siųsti priminimą apie neapmokėtą sąskaitą"
+                    >
+                      ✉️
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1807,6 +1903,115 @@ const PaymentsPage: React.FC = () => {
             }
           } : undefined}
         />
+      )}
+
+      {/* Priminimo siuntimas: pasirinkti kontaktą */}
+      {reminderModal && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 10001
+          }}
+          onClick={() => !reminderSending && setReminderModal(null)}
+        >
+          <div
+            style={{
+              backgroundColor: 'white',
+              padding: '24px',
+              borderRadius: '8px',
+              minWidth: '400px',
+              maxWidth: '500px',
+              maxHeight: '80vh',
+              overflow: 'auto',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{ margin: '0 0 16px 0', fontSize: '18px' }}>
+              Siųsti priminimą apie neapmokėtą sąskaitą
+            </h3>
+            <p style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#666' }}>
+              Sąskaita: <strong>{reminderModal.invoice.invoice_number}</strong> — {reminderModal.invoice.partner.name}
+            </p>
+            {reminderContactLoading ? (
+              <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>Kraunami kontaktai...</div>
+            ) : reminderContacts.length === 0 ? (
+              <div style={{ padding: '12px', color: '#856404', backgroundColor: '#fff3cd', borderRadius: '4px', marginBottom: '16px' }}>
+                Šis partneris neturi kontaktų su el. pašto adresu. Pridėkite kontaktą partnerio kortelėje.
+              </div>
+            ) : (
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ fontSize: '13px', fontWeight: '600', marginBottom: '8px' }}>Pasirinkite gavėją:</div>
+                {reminderContacts.map((c) => (
+                  <label
+                    key={c.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '8px 10px',
+                      marginBottom: '4px',
+                      borderRadius: '4px',
+                      backgroundColor: selectedReminderContactId === c.id ? '#e7f3ff' : '#f8f9fa',
+                      cursor: 'pointer',
+                      border: selectedReminderContactId === c.id ? '1px solid #007bff' : '1px solid transparent'
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="reminder_contact"
+                      checked={selectedReminderContactId === c.id}
+                      onChange={() => setSelectedReminderContactId(c.id)}
+                      style={{ marginRight: '10px' }}
+                    />
+                    <span style={{ flex: 1 }}>
+                      {(c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email).trim() || 'Kontaktas'}
+                      {c.email && <span style={{ color: '#666', fontSize: '12px', marginLeft: '6px' }}>({c.email})</span>}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => !reminderSending && setReminderModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: '#6c757d',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: reminderSending ? 'not-allowed' : 'pointer'
+                }}
+              >
+                Atšaukti
+              </button>
+              <button
+                type="button"
+                onClick={handleSendReminderFromModal}
+                disabled={reminderSending || reminderContacts.length === 0 || !selectedReminderContactId}
+                style={{
+                  padding: '8px 16px',
+                  backgroundColor: (reminderSending || reminderContacts.length === 0 || !selectedReminderContactId) ? '#ccc' : '#6f42c1',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: (reminderSending || reminderContacts.length === 0 || !selectedReminderContactId) ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {reminderSending ? 'Siunčiama...' : 'Siųsti priminimą'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

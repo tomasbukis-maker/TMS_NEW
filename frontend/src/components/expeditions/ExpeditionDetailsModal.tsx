@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Expedition, ExpeditionDocument } from '../../types/expedition';
+import { formatMoney } from '../../utils/formatMoney';
 import AttachmentPreviewModal, { AttachmentPreview } from '../common/AttachmentPreviewModal';
 import HTMLPreviewModal, { HTMLPreview } from '../common/HTMLPreviewModal';
 import './ExpeditionDetailsModal.css';
@@ -72,14 +73,10 @@ const formatDateTime = (value?: string | null, includeTime = true): string => {
 };
 
 const formatCurrency = (value: string | number | null | undefined): string => {
-  if (value === null || value === undefined || value === '') {
-    return '—';
-  }
+  if (value === null || value === undefined || value === '') return '—';
   const numeric = typeof value === 'number' ? value : parseFloat(String(value));
-  if (Number.isNaN(numeric)) {
-    return '—';
-  }
-  return `${numeric.toFixed(2)} €`;
+  if (Number.isNaN(numeric)) return '—';
+  return formatMoney(numeric);
 };
 
 const ExpeditionDetailsModal = ({

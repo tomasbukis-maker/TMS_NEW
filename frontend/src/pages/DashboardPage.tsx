@@ -1,21 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../services/api';
 import { useModule } from '../context/ModuleContext';
+import { formatMoney } from '../utils/formatMoney';
 import ExpenseDashboardPage from './ExpenseDashboardPage';
 import './DashboardPage.css';
+
+type PeriodType = 'today' | 'week' | 'month' | 'quarter' | 'year' | 'last7' | 'last14' | 'last30' | 'last_month' | 'last_quarter' | 'last_year' | 'all' | 'custom';
 
 interface DashboardStats {
   invoices: {
     unpaid_sales: { count: number; total: string; oldest_invoices?: any[] };
     paid_sales: { count: number; total: string };
+    partially_paid_sales: { count: number; total: string; oldest_invoices?: any[] };
     unpaid_purchase: { count: number; total: string; oldest_invoices?: any[] };
     paid_purchase: { count: number; total: string };
+    partially_paid_purchase: { count: number; total: string; oldest_invoices?: any[] };
     overdue_sales: { count: number; oldest_invoices?: any[] };
     overdue_purchase: { count: number; oldest_invoices?: any[] };
   };
-  orders: { finished: number; unfinished: number; new: number };
+  orders: {
+    total?: number;
+    new: number;
+    assigned?: number;
+    executing?: number;
+    waiting_for_docs?: number;
+    waiting_for_payment?: number;
+    finished: number;
+    closed?: number;
+    canceled?: number;
+    unfinished: number;
+  };
   clients: { new_this_month: number };
   finance?: {
     monthly_profit: string;
@@ -31,6 +47,10 @@ interface DashboardStats {
     without_carriers: number;
     finished_without_invoices: number;
     with_overdue_invoices: number;
+    without_cargo: number;
+    without_route: number;
+    without_client_price: number;
+    without_carrier_price: number;
     upcoming: any[];
   };
   carriers_tracking?: {
@@ -47,15 +67,96 @@ const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [clientsOverdue, setClientsOverdue] = useState<any[]>([]);
   const [carriersOverdue, setCarriersOverdue] = useState<any[]>([]);
-  const [periodType, setPeriodType] = useState<'month' | 'all'>('all');
+  const [periodType, setPeriodType] = useState<PeriodType>('all');
+  const [customDateFrom, setCustomDateFrom] = useState<string>('');
+  const [customDateTo, setCustomDateTo] = useState<string>('');
   const navigate = useNavigate();
+
+  const getDateRange = useCallback((period: PeriodType): { from: string | null; to: string | null } => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    switch (period) {
+      case 'today':
+        return { from: today.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      case 'week': {
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - today.getDay() + 1);
+        return { from: weekStart.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'month': {
+        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+        return { from: monthStart.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'quarter': {
+        const q = Math.floor(today.getMonth() / 3);
+        const quarterStart = new Date(today.getFullYear(), q * 3, 1);
+        return { from: quarterStart.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'year': {
+        const yearStart = new Date(today.getFullYear(), 0, 1);
+        return { from: yearStart.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last7': {
+        const from = new Date(today);
+        from.setDate(today.getDate() - 6);
+        return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last14': {
+        const from = new Date(today);
+        from.setDate(today.getDate() - 13);
+        return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last30': {
+        const from = new Date(today);
+        from.setDate(today.getDate() - 29);
+        return { from: from.toISOString().split('T')[0], to: today.toISOString().split('T')[0] };
+      }
+      case 'last_month': {
+        const y = today.getFullYear(), m = today.getMonth();
+        const first = new Date(y, m - 1, 1);
+        const last = new Date(y, m, 0);
+        return { from: first.toISOString().split('T')[0], to: last.toISOString().split('T')[0] };
+      }
+      case 'last_quarter': {
+        const q = Math.floor(today.getMonth() / 3);
+        const startM = q === 0 ? 9 : (q - 1) * 3;
+        const startY = q === 0 ? today.getFullYear() - 1 : today.getFullYear();
+        const first = new Date(startY, startM, 1);
+        const last = new Date(startY, startM + 3, 0);
+        return { from: first.toISOString().split('T')[0], to: last.toISOString().split('T')[0] };
+      }
+      case 'last_year': {
+        const y = today.getFullYear() - 1;
+        return { from: `${y}-01-01`, to: `${y}-12-31` };
+      }
+      case 'custom':
+        return { from: customDateFrom || null, to: customDateTo || null };
+      case 'all':
+      default:
+        return { from: null, to: null };
+    }
+  }, [customDateFrom, customDateTo]);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
+        const dateRange = getDateRange(periodType);
+        const params: Record<string, string> = {};
+        if (periodType === 'all') {
+          params.period_type = 'all';
+        } else if (dateRange.from && dateRange.to) {
+          params.period_type = 'month';
+          params.date_from = dateRange.from;
+          params.date_to = dateRange.to;
+        } else {
+          const fromDate = new Date(dateRange.from || new Date());
+          params.period_type = 'month';
+          params.year = String(fromDate.getFullYear());
+          params.month = String(fromDate.getMonth() + 1);
+        }
         const [statsRes, clientsRes, carriersRes] = await Promise.all([
-          api.get(`/dashboard/statistics/?period_type=${periodType}`),
+          api.get('/dashboard/statistics/', { params }),
           api.get('/dashboard/clients-overdue/'),
           api.get('/dashboard/carriers-overdue/')
         ]);
@@ -70,16 +171,9 @@ const DashboardPage: React.FC = () => {
     };
 
     fetchData();
-  }, [periodType]);
+  }, [periodType, getDateRange]);
 
-  const formatCurrency = (amount: string) => {
-    const num = parseFloat(amount);
-    return new Intl.NumberFormat('lt-LT', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-    }).format(num);
-  };
+  const formatCurrency = (amount: string | number) => formatMoney(amount);
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
@@ -109,52 +203,44 @@ const DashboardPage: React.FC = () => {
   return (
     <div style={{ padding: '10px', maxWidth: '100%', backgroundColor: '#f5f5f5', minHeight: '100vh' }}>
       {/* Laikotarpio pasirinkimas */}
-      <div style={{ 
-        marginBottom: '10px', 
-        padding: '8px 12px', 
-        backgroundColor: 'white', 
+      <div style={{
+        marginBottom: '10px',
+        padding: '8px 12px',
+        backgroundColor: 'white',
         borderRadius: '6px',
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
         display: 'flex',
+        flexWrap: 'wrap',
         alignItems: 'center',
-        gap: '12px'
+        gap: '8px'
       }}>
         <span style={{ fontSize: '11px', fontWeight: '600', color: '#495057' }}>Laikotarpis:</span>
-        <button
-          onClick={() => setPeriodType('all')}
-          style={{
-            padding: '4px 12px',
-            fontSize: '10px',
-            fontWeight: '600',
-            border: '1px solid #dee2e6',
-            borderRadius: '4px',
-            backgroundColor: periodType === 'all' ? '#007bff' : 'white',
-            color: periodType === 'all' ? 'white' : '#495057',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-        >
-          Viso laikotarpio
-        </button>
-        <button
-          onClick={() => setPeriodType('month')}
-          style={{
-            padding: '4px 12px',
-            fontSize: '10px',
-            fontWeight: '600',
-            border: '1px solid #dee2e6',
-            borderRadius: '4px',
-            backgroundColor: periodType === 'month' ? '#007bff' : 'white',
-            color: periodType === 'month' ? 'white' : '#495057',
-            cursor: 'pointer',
-            transition: 'all 0.2s'
-          }}
-        >
-          Šis mėnuo
-        </button>
-        <span style={{ fontSize: '9px', color: '#999', marginLeft: 'auto' }}>
-          {periodType === 'all' ? 'Rodo visus duomenis nuo pradžių' : 'Rodo tik šio mėnesio duomenis'}
-        </span>
+        {(['today', 'week', 'month', 'quarter', 'year', 'last7', 'last14', 'last30', 'last_month', 'last_quarter', 'last_year', 'all', 'custom'] as PeriodType[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriodType(p)}
+            style={{
+              padding: '4px 10px',
+              fontSize: '10px',
+              fontWeight: '600',
+              border: '1px solid #dee2e6',
+              borderRadius: '4px',
+              backgroundColor: periodType === p ? '#007bff' : 'white',
+              color: periodType === p ? 'white' : '#495057',
+              cursor: 'pointer',
+              transition: 'all 0.2s'
+            }}
+          >
+            {p === 'today' ? 'Šiandien' : p === 'week' ? 'Ši savaitė' : p === 'month' ? 'Šis mėnuo' : p === 'quarter' ? 'Šis ketvirtis' : p === 'year' ? 'Šie metai' : p === 'last7' ? 'Paskutinės 7 d.' : p === 'last14' ? 'Paskutinės 14 d.' : p === 'last30' ? 'Paskutiniai 30 d.' : p === 'last_month' ? 'Praeitas mėnuo' : p === 'last_quarter' ? 'Praeitas ketvirtis' : p === 'last_year' ? 'Praeiti metai' : p === 'all' ? 'Viso laikotarpio' : 'Pasirinkti datas'}
+          </button>
+        ))}
+        {periodType === 'custom' && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <input type="date" value={customDateFrom} onChange={(e) => setCustomDateFrom(e.target.value)} style={{ padding: '2px 6px', fontSize: '10px' }} />
+            <span>—</span>
+            <input type="date" value={customDateTo} onChange={(e) => setCustomDateTo(e.target.value)} style={{ padding: '2px 6px', fontSize: '10px' }} />
+          </span>
+        )}
       </div>
 
       {/* Viršutinė greitosios statistikos eilutė */}
@@ -178,7 +264,7 @@ const DashboardPage: React.FC = () => {
         >
           <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>💰 Pelnas</div>
           <div style={{ fontSize: '18px', fontWeight: '700', color: '#28a745' }}>
-            {stats.finance ? formatCurrency(stats.finance.monthly_profit) : '0.00 EUR'}
+            {stats.finance ? formatCurrency(stats.finance.monthly_profit) : formatMoney(0)}
           </div>
           {stats.finance && (
             <div style={{ fontSize: '8px', color: '#999', marginTop: '4px', lineHeight: '1.3' }}>
@@ -225,10 +311,13 @@ const DashboardPage: React.FC = () => {
         >
           <div style={{ fontSize: '9px', color: '#666', marginBottom: '4px', fontWeight: '600', textTransform: 'uppercase' }}>📋 Užsakymai</div>
           <div style={{ fontSize: '18px', fontWeight: '700', color: '#007bff' }}>
-            {stats.orders.new + stats.orders.unfinished}
+            {stats.orders.total ?? 0}
           </div>
           <div style={{ fontSize: '8px', color: '#999', marginTop: '4px' }}>
-            Nauji: {stats.orders.new} | Nebaigti: {stats.orders.unfinished} | Baigti: {stats.orders.finished}
+            Nauji: {stats.orders.new} | Priskirti: {stats.orders.assigned ?? 0} | Vykdomi: {stats.orders.executing ?? 0} | Laukia: {(stats.orders.waiting_for_docs ?? 0) + (stats.orders.waiting_for_payment ?? 0)} | Baigti: {stats.orders.finished} | Uždaryti: {stats.orders.closed ?? 0} | Atšaukti: {stats.orders.canceled ?? 0}
+          </div>
+          <div style={{ fontSize: '7px', color: '#aaa', marginTop: '2px' }}>
+            Viso užsakymų
           </div>
         </div>
 
@@ -412,6 +501,15 @@ const DashboardPage: React.FC = () => {
                   {formatCurrency(stats.invoices.unpaid_sales.total)}
                 </div>
               </div>
+              <div style={{ padding: '8px', backgroundColor: '#cce5ff', borderRadius: '4px', border: '1px solid #b8daff' }}>
+                <div style={{ fontSize: '9px', color: '#004085', marginBottom: '4px', fontWeight: '600' }}>Išrašytos dalinai apmokėtos</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#004085' }}>
+                  {stats.invoices.partially_paid_sales?.count ?? 0}
+                </div>
+                <div style={{ fontSize: '9px', color: '#004085', marginTop: '2px' }}>
+                  {formatCurrency(stats.invoices.partially_paid_sales?.total ?? '0')}
+                </div>
+              </div>
               <div style={{ padding: '8px', backgroundColor: '#f8d7da', borderRadius: '4px', border: '1px solid #f5c6cb' }}>
                 <div style={{ fontSize: '9px', color: '#721c24', marginBottom: '4px', fontWeight: '600' }}>Išrašytos vėluojančios</div>
                 <div style={{ fontSize: '16px', fontWeight: '700', color: '#721c24' }}>
@@ -439,6 +537,15 @@ const DashboardPage: React.FC = () => {
                 </div>
                 <div style={{ fontSize: '9px', color: '#856404', marginTop: '2px' }}>
                   {formatCurrency(stats.invoices.unpaid_purchase.total)}
+                </div>
+              </div>
+              <div style={{ padding: '8px', backgroundColor: '#cce5ff', borderRadius: '4px', border: '1px solid #b8daff' }}>
+                <div style={{ fontSize: '9px', color: '#004085', marginBottom: '4px', fontWeight: '600' }}>Gautos dalinai apmokėtos</div>
+                <div style={{ fontSize: '16px', fontWeight: '700', color: '#004085' }}>
+                  {stats.invoices.partially_paid_purchase?.count ?? 0}
+                </div>
+                <div style={{ fontSize: '9px', color: '#004085', marginTop: '2px' }}>
+                  {formatCurrency(stats.invoices.partially_paid_purchase?.total ?? '0')}
                 </div>
               </div>
               <div style={{ padding: '8px', backgroundColor: '#f8d7da', borderRadius: '4px', border: '1px solid #f5c6cb' }}>
@@ -640,6 +747,114 @@ const DashboardPage: React.FC = () => {
                     {stats.orders_tracking.with_overdue_invoices}
                   </span>
                 </div>
+                <div 
+                  onClick={() => navigate('/orders')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1ecf1', 
+                    borderRadius: '4px',
+                    border: '1px solid #bee5eb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bee5eb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1ecf1';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#0c5460', fontWeight: '600' }}>📦 Be krovinių</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#0c5460' }}>
+                    {stats.orders_tracking.without_cargo ?? 0}
+                  </span>
+                </div>
+                <div 
+                  onClick={() => navigate('/orders')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1ecf1', 
+                    borderRadius: '4px',
+                    border: '1px solid #bee5eb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bee5eb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1ecf1';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#0c5460', fontWeight: '600' }}>🛣️ Be maršruto</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#0c5460' }}>
+                    {stats.orders_tracking.without_route ?? 0}
+                  </span>
+                </div>
+                <div 
+                  onClick={() => navigate('/orders')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1ecf1', 
+                    borderRadius: '4px',
+                    border: '1px solid #bee5eb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bee5eb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1ecf1';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#0c5460', fontWeight: '600' }}>💰 Be kainos klientui</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#0c5460' }}>
+                    {stats.orders_tracking.without_client_price ?? 0}
+                  </span>
+                </div>
+                <div 
+                  onClick={() => navigate('/orders')}
+                  style={{ 
+                    padding: '8px', 
+                    backgroundColor: '#d1ecf1', 
+                    borderRadius: '4px',
+                    border: '1px solid #bee5eb',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = '#bee5eb';
+                    e.currentTarget.style.transform = 'translateX(2px)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = '#d1ecf1';
+                    e.currentTarget.style.transform = 'translateX(0)';
+                  }}
+                >
+                  <span style={{ fontSize: '10px', color: '#0c5460', fontWeight: '600' }}>💰 Be kainos vežėjui</span>
+                  <span style={{ fontSize: '16px', fontWeight: '700', color: '#0c5460' }}>
+                    {stats.orders_tracking.without_carrier_price ?? 0}
+                  </span>
+                </div>
               </div>
               {stats.orders_tracking.upcoming && stats.orders_tracking.upcoming.length > 0 && (
                 <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px solid #eee' }}>
@@ -805,23 +1020,25 @@ const DashboardPage: React.FC = () => {
           )}
         </div>
 
-        {/* Dešinė pusė - Klientai ir Vežėjai su vėluojančiomis */}
+        {/* Dešinė pusė - Klientai ir Vežėjai su vėluojančiomis (visada rodoma) */}
         <div style={{ display: 'grid', gap: '10px' }}>
           {/* Klientai su vėluojančiomis */}
-          {clientsOverdue.length > 0 && (
-            <div style={{ 
-              backgroundColor: 'white', 
-              borderRadius: '6px', 
-              padding: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-            }}>
-              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span>👥</span>
-                <span>KLIENTAI SU VĖLUOJANČIOMIS</span>
-                <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({clientsOverdue.length})</span>
-              </div>
-              <div style={{ display: 'grid', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
-                {clientsOverdue.slice(0, 10).map((client) => (
+          <div style={{ 
+            backgroundColor: 'white', 
+            borderRadius: '6px', 
+            padding: '12px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>👥</span>
+              <span>KLIENTAI SU VĖLUOJANČIOMIS</span>
+              <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({clientsOverdue.length})</span>
+            </div>
+            <div style={{ display: 'grid', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
+              {clientsOverdue.length === 0 ? (
+                <div style={{ padding: '12px', color: '#6c757d', fontSize: '11px', textAlign: 'center' }}>Nėra klientų su vėluojančiomis sąskaitomis</div>
+              ) : (
+                clientsOverdue.slice(0, 10).map((client) => (
                   <div
                     key={client.id}
                     onClick={() => navigate(`/partners/${client.id}`)}
@@ -858,26 +1075,28 @@ const DashboardPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
 
           {/* Vežėjai su vėluojančiomis */}
-          {carriersOverdue.length > 0 && (
-            <div style={{ 
-              backgroundColor: 'white', 
-              borderRadius: '6px', 
-              padding: '12px',
-              boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-            }}>
-              <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <span>🚚</span>
-                <span>VEŽĖJAI SU VĖLUOJANČIOMIS</span>
-                <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({carriersOverdue.length})</span>
-              </div>
-              <div style={{ display: 'grid', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
-                {carriersOverdue.slice(0, 10).map((carrier) => (
+          <div style={{ 
+            backgroundColor: 'white', 
+            borderRadius: '6px', 
+            padding: '12px',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+          }}>
+            <div style={{ fontSize: '11px', fontWeight: '700', marginBottom: '10px', color: '#495057', borderBottom: '1px solid #eee', paddingBottom: '6px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <span>🚚</span>
+              <span>VEŽĖJAI SU VĖLUOJANČIOMIS</span>
+              <span style={{ fontSize: '9px', color: '#999', fontWeight: 'normal' }}>({carriersOverdue.length})</span>
+            </div>
+            <div style={{ display: 'grid', gap: '6px', maxHeight: '300px', overflowY: 'auto' }}>
+              {carriersOverdue.length === 0 ? (
+                <div style={{ padding: '12px', color: '#6c757d', fontSize: '11px', textAlign: 'center' }}>Nėra vežėjų su vėluojančiomis sąskaitomis</div>
+              ) : (
+                carriersOverdue.slice(0, 10).map((carrier) => (
                   <div
                     key={carrier.id}
                     onClick={() => navigate(`/partners/${carrier.id}`)}
@@ -914,10 +1133,10 @@ const DashboardPage: React.FC = () => {
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
     </div>

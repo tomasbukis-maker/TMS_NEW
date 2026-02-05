@@ -3,18 +3,22 @@ import { Decimal } from 'decimal.js';
 import { OrderCarrier } from './OrderEditModal_NEW';
 import { api } from '../../services/api';
 import PaymentService from '../../services/paymentService';
+import { formatMoney } from '../../utils/formatMoney';
 import HTMLPreviewModal, { HTMLPreview } from '../common/HTMLPreviewModal';
 import AttachmentPreviewModal, { AttachmentPreview } from '../common/AttachmentPreviewModal';
 
 interface OtherCost {
   description: string;
   amount: string | number;
+  visible_on_invoice?: boolean;
 }
 
 interface SalesInvoice {
   id: number;
   invoice_number: string;
+  amount_net?: string;
   amount_total: string;
+  vat_rate?: string | number | null;
   paid_amount?: string;
   remaining_amount?: string;
   payment_status: string;
@@ -229,11 +233,14 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
     return sum.plus(new Decimal(c.amount || 0));
   }, new Decimal(0));
   
-  const totalCostsNet = carriersPriceNet.plus(otherCostsNet);
-  const profitNet = clientPriceNet.minus(totalCostsNet);
+  // Pardavimas = kliento kaina + papildomos sąnaudos (klientas moka ir už papildomas išlaidas)
+  const salesTotal = clientPriceNet.plus(otherCostsNet);
+  // Sąnaudos = tik vežėjų kainos (be papildomų išlaidų)
+  const totalCostsNet = carriersPriceNet;
+  const profitNet = salesTotal.minus(totalCostsNet);
   
-  const profitPercentage = clientPriceNet.gt(0) 
-    ? profitNet.dividedBy(clientPriceNet).times(100).toFixed(2)
+  const profitPercentage = salesTotal.gt(0) 
+    ? profitNet.dividedBy(salesTotal).times(100).toFixed(2)
     : '0.00';
 
   const handleCarrierChange = (idx: number, field: keyof OrderCarrier, value: any) => {
@@ -263,7 +270,7 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
   };
 
   const onOtherCostAdd = () => {
-    const newCosts = [...(formData.other_costs || []), { description: '', amount: '' }];
+    const newCosts = [...(formData.other_costs || []), { description: '', amount: '', visible_on_invoice: true }];
     setFormData((prev: any) => ({ ...prev, other_costs: newCosts }));
   };
 
@@ -282,16 +289,16 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
       }}>
         <div className="summary-item">
           <label style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase' }}>Pardavimas</label>
-          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#007bff' }}>{clientPriceNet.toFixed(2)} EUR</div>
+          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#007bff' }}>{formatMoney(salesTotal.toNumber())}</div>
         </div>
         <div className="summary-item">
           <label style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase' }}>Sąnaudos</label>
-          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#dc3545' }}>{totalCostsNet.toFixed(2)} EUR</div>
+          <div style={{ fontSize: '18px', fontWeight: 'bold', color: '#dc3545' }}>{formatMoney(totalCostsNet.toNumber())}</div>
         </div>
         <div className="summary-item">
           <label style={{ fontSize: '11px', color: '#666', textTransform: 'uppercase' }}>Pelnas</label>
           <div style={{ fontSize: '18px', fontWeight: 'bold', color: profitNet.gte(0) ? '#28a745' : '#dc3545' }}>
-            {profitNet.toFixed(2)} EUR
+            {formatMoney(profitNet.toNumber())}
           </div>
         </div>
         <div className="summary-item">
@@ -337,13 +344,19 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                   <tr>
                     <th>Nr.</th>
                     <th>Data</th>
-                    <th>Suma su PVM</th>
+                    <th>Suma</th>
                     <th>Būsena</th>
                     <th>Veiksmai</th>
                   </tr>
                 </thead>
                 <tbody>
                   {salesInvoices.map(inv => {
+                    const vatRate = Number(inv.vat_rate);
+                    const isWithVat = !Number.isNaN(vatRate) && vatRate > 0;
+                    const displayAmount = isWithVat
+                      ? (inv.amount_total ? parseFloat(inv.amount_total) : 0)
+                      : (inv.amount_net != null && inv.amount_net !== '' ? parseFloat(inv.amount_net) : parseFloat(inv.amount_total || '0'));
+                    const amountLabel = isWithVat ? 'su PVM' : 'be PVM';
                     // Apskaičiuoti tikrąjį statusą pagal paid_amount ir remaining_amount
                     const paidAmount = parseFloat(inv.paid_amount || '0');
                     const totalAmount = parseFloat(inv.amount_total || '0');
@@ -366,10 +379,10 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                       <td>{inv.invoice_number}</td>
                       <td>{inv.issue_date}</td>
                       <td>
-                        <div>{inv.amount_total} EUR</div>
+                        <div>{formatMoney(Number.isNaN(displayAmount) ? 0 : displayAmount)} <span style={{ fontSize: '11px', color: '#666' }}>({amountLabel})</span></div>
                         {inv.paid_amount && parseFloat(inv.paid_amount) > 0 && (
                           <div style={{ fontSize: '11px', color: '#666' }}>
-                            Apmokėta: {parseFloat(inv.paid_amount).toFixed(2)} EUR
+                            Apmokėta: {formatMoney(inv.paid_amount)}
                           </div>
                         )}
                         {inv.paid_amount && inv.remaining_amount && 
@@ -377,7 +390,7 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                          parseFloat(inv.remaining_amount) > 0 && 
                          parseFloat(inv.paid_amount) < parseFloat(inv.amount_total) && (
                           <div style={{ fontSize: '11px', color: '#dc3545', fontWeight: '600' }}>
-                            Likutis: {parseFloat(inv.remaining_amount).toFixed(2)} EUR
+                            Likutis: {formatMoney(inv.remaining_amount)}
                           </div>
                         )}
                       </td>
@@ -507,10 +520,10 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                                   </td>
                                   <td>{inv.received_invoice_number}</td>
                                   <td>
-                                    <div>{inv.amount_total} EUR</div>
+                                    <div>{formatMoney(inv.amount_total)}</div>
                                     {inv.paid_amount && parseFloat(inv.paid_amount) > 0 && (
                                       <div style={{ fontSize: '11px', color: '#666' }}>
-                                        Apmokėta: {parseFloat(inv.paid_amount).toFixed(2)} EUR
+                                        Apmokėta: {formatMoney(inv.paid_amount)}
                                       </div>
                                     )}
                                     {inv.paid_amount && inv.remaining_amount && 
@@ -518,7 +531,7 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                                      parseFloat(inv.remaining_amount) > 0 && 
                                      parseFloat(inv.paid_amount) < parseFloat(inv.amount_total) && (
                                       <div style={{ fontSize: '11px', color: '#dc3545', fontWeight: '600' }}>
-                                        Likutis: {parseFloat(inv.remaining_amount).toFixed(2)} EUR
+                                        Likutis: {formatMoney(inv.remaining_amount)}
                                       </div>
                                     )}
                                   </td>
@@ -606,13 +619,22 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
             <div className="form-group">
               <label>Kaina klientui (be PVM) *</label>
               <input 
-                type="number" 
-                step="0.01" 
-                value={formData.client_price_net} 
+                type="text"
+                inputMode="decimal"
+                value={formData.client_price_net ? String(formData.client_price_net).replace('.', ',') : ''}
                 onChange={(e) => {
-                  console.log('💰 Input onChange:', e.target.value);
                   handleClientPriceChange(e);
-                }} 
+                }}
+                onBlur={(e) => {
+                  const v = e.target.value.replace(',', '.');
+                  if (v !== '' && v != null) {
+                    const n = parseFloat(v);
+                    if (!Number.isNaN(n) && n >= 0) {
+                      handleClientPriceChange({ target: { value: n.toFixed(2) } } as React.ChangeEvent<HTMLInputElement>);
+                    }
+                  }
+                }}
+                placeholder="0,00"
                 className="form-control" 
               />
             </div>
@@ -673,6 +695,14 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                   border: '1px solid #eee',
                   borderRadius: '4px'
                 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', flex: '0 0 auto', minWidth: '28px', marginRight: '2px' }} title="Rodyti išrašytoje sąskaitoje">
+                    <input
+                      type="checkbox"
+                      checked={cost.visible_on_invoice !== false}
+                      onChange={(e) => onOtherCostChange(idx, 'visible_on_invoice', e.target.checked)}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                  </label>
                   <input 
                     type="text" 
                     value={cost.description} 
@@ -682,11 +712,24 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                     style={{ flex: 2, fontSize: '12px', padding: '4px' }}
                   />
                   <input 
-                    type="number" 
-                    value={cost.amount} 
-                    onChange={(e) => onOtherCostChange(idx, 'amount', e.target.value)} 
+                    type="text"
+                    inputMode="decimal"
+                    value={cost.amount != null && cost.amount !== '' ? String(cost.amount).replace('.', ',') : ''}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(',', '.');
+                      onOtherCostChange(idx, 'amount', v);
+                    }}
+                    onBlur={(e) => {
+                      const v = e.target.value.replace(',', '.');
+                      if (v !== '') {
+                        const n = parseFloat(v);
+                        if (!Number.isNaN(n)) {
+                          onOtherCostChange(idx, 'amount', n.toFixed(2));
+                        }
+                      }
+                    }}
                     className="form-control" 
-                    placeholder="Suma"
+                    placeholder="0,00"
                     style={{ flex: 1, fontSize: '12px', padding: '4px' }}
                   />
                   <button 
@@ -754,10 +797,21 @@ const OrderEdit_Finance: React.FC<OrderFinanceProps> = ({
                               </td>
                   <td style={{ padding: '8px' }}>
                     <input 
-                      type="number" 
-                      step="0.01" 
-                      value={c.price_net || ''} 
-                      onChange={(e) => handleCarrierChange(idx, 'price_net', e.target.value)} 
+                      type="text"
+                      inputMode="decimal"
+                      value={c.price_net != null && c.price_net !== '' ? String(c.price_net).replace('.', ',') : ''}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(',', '.');
+                        if (/^-?\d*\.?\d*$/.test(v) || v === '') handleCarrierChange(idx, 'price_net', v);
+                      }}
+                      onBlur={(e) => {
+                        const v = e.target.value.replace(',', '.');
+                        if (v !== '') {
+                          const n = parseFloat(v);
+                          if (!Number.isNaN(n) && n >= 0) handleCarrierChange(idx, 'price_net', n.toFixed(2));
+                        }
+                      }}
+                      placeholder="0,00"
                       className="form-control"
                       style={{ width: '90px' }}
                     />

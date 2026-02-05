@@ -327,6 +327,42 @@
   color: white;
 }
 
+.badge-invalid-codes {
+  background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+  color: white;
+}
+
+.badge-legacy-code {
+  background: #95a5a6;
+  color: white;
+}
+
+/* Partnerio modalo tabai (peržiūra/redagavimas) */
+.partner-detail-modal .partner-modal-tabs {
+  flex-shrink: 0;
+}
+.partner-detail-modal .partner-modal-content {
+  min-height: 420px;
+}
+.partner-tab-btn {
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #495057;
+  border-bottom: 2px solid transparent;
+  transition: color 0.2s, border-color 0.2s;
+}
+.partner-tab-btn:hover {
+  color: #007bff;
+}
+.partner-tab-btn.active {
+  color: #007bff;
+  border-bottom-color: #007bff;
+}
+
 .partner-card-body {
   flex: 1;
   display: flex;

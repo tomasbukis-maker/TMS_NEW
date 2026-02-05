@@ -225,6 +225,12 @@
   line-height: 1.6;
 }
 
+.metric-hint {
+  font-size: 10px;
+  color: #bdc3c7;
+  margin-top: 4px;
+}
+
 /* Alerts */
 .dashboard-alerts {
   background: white;
@@ -324,6 +330,13 @@
   color: #2c3e50;
 }
 
+.dashboard-empty-hint {
+  padding: 12px;
+  color: #6c757d;
+  font-size: 13px;
+  text-align: center;
+}
+
 .section-content {
   display: flex;
   flex-direction: column;
@@ -388,6 +401,12 @@
   background: #f8d7da;
   border-color: #f5c6cb;
   color: #721c24;
+}
+
+.invoice-partially-paid {
+  background: #cce5ff;
+  border-color: #b8daff;
+  color: #004085;
 }
 
 .invoice-label {

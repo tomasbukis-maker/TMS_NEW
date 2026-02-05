@@ -176,6 +176,29 @@ class SalesInvoice(models.Model):
         except (AttributeError, Exception):
             return self.amount_total or Decimal('0.00')
 
+    @property
+    def effective_amount_net(self):
+        """Suma be PVM: kai susieta keli užsakymai – visų susietų užsakymų sumų suma; kai vienas – saugota amount_net."""
+        try:
+            if hasattr(self, 'invoice_orders') and self.invoice_orders.exists():
+                from django.db.models import Sum
+                total = self.invoice_orders.aggregate(s=Sum('amount'))['s']
+                if total is not None:
+                    return total
+        except (AttributeError, Exception):
+            pass
+        return self.amount_net or Decimal('0.00')
+
+    @property
+    def effective_amount_total(self):
+        """Suma su PVM: effective_amount_net * (1 + vat_rate/100)."""
+        try:
+            net = self.effective_amount_net
+            vat = (self.vat_rate or Decimal('0')) / Decimal('100')
+            return net * (Decimal('1') + vat)
+        except (AttributeError, TypeError, Exception):
+            return self.amount_total or Decimal('0.00')
+
 
 class SalesInvoiceOrder(models.Model):
     """Tarpinė lentelė tarp SalesInvoice ir Order (ManyToMany)"""

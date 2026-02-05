@@ -612,62 +612,53 @@ class Order(models.Model):
                 }
             
             invoices = SalesInvoice.objects.filter(id__in=invoice_ids)
-            
-            # Tikrinti apmokėjimo statusą
-            if self.client_payment_status == 'paid':
-                # Rasti paskutinę apmokėjimo datą
-                paid_invoices = invoices.filter(payment_status='paid', payment_date__isnull=False)
-                if paid_invoices.exists():
-                    last_payment = paid_invoices.order_by('-payment_date').first()
-                    return {
-                        'status': 'paid',
-                        'message': 'Apmokėta',
-                        'has_invoices': True,
-                        'invoice_issued': self.client_invoice_issued,
-                        'payment_date': last_payment.payment_date.isoformat()
-                    }
+            count = invoices.count()
+            paid_count = invoices.filter(payment_status='paid').count()
+            partially_count = invoices.filter(payment_status='partially_paid').count()
+            unpaid_count = invoices.filter(payment_status='unpaid').count()
+            overdue_count = invoices.filter(payment_status='overdue').count()
+
+            from django.utils import timezone
+            today = timezone.now().date()
+            overdue_invoices = invoices.filter(
+                payment_status__in=('unpaid', 'overdue'),
+                due_date__lt=today
+            )
+
+            # Statusas iš TIKRŲ sąskaitų mokėjimo būsenų, ne iš order.client_payment_status
+            if count > 0 and paid_count == count:
+                last_paid = invoices.filter(payment_status='paid').order_by('-payment_date').first()
+                payment_date_iso = last_paid.payment_date.isoformat() if getattr(last_paid, 'payment_date', None) else None
                 return {
                     'status': 'paid',
                     'message': 'Apmokėta',
                     'has_invoices': True,
-                    'invoice_issued': self.client_invoice_issued
+                    'invoice_issued': self.client_invoice_issued,
+                    'payment_date': payment_date_iso
                 }
-            
-            elif self.client_payment_status == 'partially_paid':
+            if paid_count > 0 or partially_count > 0:
                 return {
                     'status': 'partially_paid',
                     'message': 'Dalinai apmokėta',
                     'has_invoices': True,
                     'invoice_issued': self.client_invoice_issued
                 }
-            
-            else:
-                # Tikrinti ar yra vėluojančių sąskaitų
-                from django.utils import timezone
-                today = timezone.now().date()
-                
-                overdue_invoices = invoices.filter(
-                    payment_status='unpaid',
-                    due_date__lt=today
-                )
-                
-                if overdue_invoices.exists():
-                    max_overdue = overdue_invoices.order_by('due_date').first()
-                    overdue_days = (today - max_overdue.due_date).days
-                    return {
-                        'status': 'overdue',
-                        'message': f'Vėluoja apmokėti ({overdue_days} d.)',
-                        'has_invoices': True,
-                        'invoice_issued': self.client_invoice_issued,
-                        'overdue_days': overdue_days
-                    }
-                
+            if overdue_invoices.exists():
+                max_overdue = overdue_invoices.order_by('due_date').first()
+                overdue_days = (today - max_overdue.due_date).days
                 return {
-                    'status': 'not_paid',
-                    'message': 'Neapmokėta',
+                    'status': 'overdue',
+                    'message': f'Vėluoja apmokėti ({overdue_days} d.)',
                     'has_invoices': True,
-                    'invoice_issued': self.client_invoice_issued
+                    'invoice_issued': self.client_invoice_issued,
+                    'overdue_days': overdue_days
                 }
+            return {
+                'status': 'not_paid',
+                'message': 'Neapmokėta',
+                'has_invoices': True,
+                'invoice_issued': self.client_invoice_issued
+            }
         except Exception as e:
             return {
                 'status': 'not_paid',

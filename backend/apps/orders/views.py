@@ -36,7 +36,8 @@ from .utils import (
     find_expedition_number_gaps, 
     get_first_available_expedition_gap_number,
     find_order_number_gaps,
-    get_first_available_order_gap_number
+    get_first_available_order_gap_number,
+    get_suggested_order_number,
 )
 from apps.settings.models import OrderSettings, CompanyInfo
 from apps.settings.email_utils import render_email_template
@@ -957,18 +958,21 @@ class OrderCarrierViewSet(viewsets.ModelViewSet):
                         )
                         
                         # Siųsti el. laišką naudojant šabloną
-                        # Paruošti context su carrier duomenimis
+                        # Paruošti context su carrier duomenimis (užsakymo/kliento numeriai, maršrutas, datos, ekspedicija)
+                        from apps.settings.format_utils import format_money
+                        o = carrier.order
                         context = {
-                            'order_number': carrier.order.order_number if carrier.order else 'N/A',
-                            'order_date': carrier.order.order_date.strftime('%Y-%m-%d') if carrier.order and carrier.order.order_date else 'N/A',
+                            'order_number': o.order_number if o else 'N/A',
+                            'client_order_number': getattr(o, 'client_order_number', None) or '' if o else '',
+                            'order_date': o.order_date.strftime('%Y-%m-%d') if o and o.order_date else 'N/A',
                             'partner_name': carrier.partner.name if carrier.partner else '',
                             'partner_code': carrier.partner.code if carrier.partner and hasattr(carrier.partner, 'code') else '',
                             'partner_vat_code': carrier.partner.vat_code if carrier.partner and hasattr(carrier.partner, 'vat_code') else '',
-                            'route_from': carrier.route_from or (carrier.order.route_from if carrier.order else ''),
-                            'route_to': carrier.route_to or (carrier.order.route_to if carrier.order else ''),
-                            'loading_date': carrier.loading_date.strftime('%Y-%m-%d') if carrier.loading_date else '',
-                            'unloading_date': carrier.unloading_date.strftime('%Y-%m-%d') if carrier.unloading_date else '',
-                            'price_net': str(carrier.price_net) if carrier.price_net else '0',
+                            'route_from': carrier.route_from or (o.route_from if o else ''),
+                            'route_to': carrier.route_to or (o.route_to if o else ''),
+                            'loading_date': carrier.loading_date.strftime('%Y-%m-%d') if carrier.loading_date else (o.loading_date.strftime('%Y-%m-%d') if o and o.loading_date else ''),
+                            'unloading_date': carrier.unloading_date.strftime('%Y-%m-%d') if carrier.unloading_date else (o.unloading_date.strftime('%Y-%m-%d') if o and o.unloading_date else ''),
+                            'price_net': format_money(carrier.price_net or 0),
                             'expedition_number': carrier.expedition_number or '',
                         }
                         
@@ -1294,12 +1298,15 @@ class OrderCarrierDocumentViewSet(viewsets.ModelViewSet):
             return
         
         # Patikrinti ar jau nėra tokios PurchaseInvoice su tuo pačiu received_invoice_number
+        # SVARBU: susieti tik jei tai TO PATIES tiekėjo (carrier.partner) sąskaita – kad klaidingai
+        # nepririštume kitų tiekėjų sąskaitos prie šio užsakymo (pvz. INV-0016 Stoletos prie užsakymo su kitu vežėju)
         existing_invoice = PurchaseInvoice.objects.filter(
-            received_invoice_number=document.invoice_number
+            received_invoice_number=document.invoice_number,
+            partner=partner
         ).first()
         
         if existing_invoice:
-            # Jei jau egzistuoja, susieti su užsakymu (jei dar nėra susieta)
+            # Jei jau egzistuoja TO PATIES tiekėjo sąskaita – susieti su šiuo užsakymu (jei dar nėra)
             order = carrier.order
             if order and existing_invoice.related_order != order:
                 # Naudoti related_orders ManyToMany, jei related_order jau užimtas
@@ -1391,7 +1398,10 @@ class OrderViewSet(viewsets.ModelViewSet):
     # Pašalinti 'sales_invoices' iš čia - jis bus pridėtas get_queryset() su Prefetch
     queryset = Order.objects.select_related('client', 'manager', 'created_by').prefetch_related(
         'carriers__partner',
+        'carriers__documents',
         'cargo_items',
+        'cargo_items__loading_stop',
+        'cargo_items__unloading_stop',
         'order_sales_invoices__invoice'
     ).all()
     
@@ -1422,8 +1432,8 @@ class OrderViewSet(viewsets.ModelViewSet):
         'receiver_route_to',
         'vehicle_type',
     ]
-    ordering_fields = ['created_at', 'order_date', 'loading_date', 'unloading_date']
-    ordering = ['-created_at']
+    ordering_fields = ['created_at', 'order_date', 'order_number', 'loading_date', 'unloading_date']
+    ordering = ['-order_number']  # didžiausias užsakymo numeris viršuje
     
     def filter_queryset(self, queryset):
         """Perrašytas filter_queryset su custom paieška pagal visus laukus, įskaitant datas ir kainas"""
@@ -1677,12 +1687,25 @@ class OrderViewSet(viewsets.ModelViewSet):
             else:
                 amount_val = Decimal(str(calculated_net)) if calculated_net is not None else None
 
+            # Papildomos išlaidos – įtraukti į suggested_amount_net (kaina klientui = bazė + other_costs)
+            other_costs_list = getattr(order, 'other_costs', None)
+            other_costs_total = Decimal('0.00')
+            if other_costs_list and isinstance(other_costs_list, list):
+                for c in other_costs_list:
+                    if isinstance(c, dict) and 'amount' in c:
+                        try:
+                            other_costs_total += Decimal(str(c['amount']))
+                        except (ValueError, TypeError):
+                            pass
+            suggested_with_other = (amount_val + other_costs_total) if amount_val is not None else None
+
             results.append({
                 'id': order.id,
                 'order_number': order.order_number or f'Užsakymas #{order.id}',
                 'client_price_net': str(order.client_price_net) if order.client_price_net is not None else None,
                 'calculated_client_price_net': str(calculated_net) if calculated_net is not None else None,
-                'suggested_amount_net': str(amount_val) if amount_val is not None else None,
+                'suggested_amount_net': str(suggested_with_other) if suggested_with_other is not None else None,
+                'other_costs': order.other_costs if hasattr(order, 'other_costs') and order.other_costs else [],
                 'vat_rate': str(order.vat_rate) if order.vat_rate is not None else None,
                 'route_from': order.route_from,
                 'route_to': order.route_to,
@@ -1757,12 +1780,21 @@ class OrderViewSet(viewsets.ModelViewSet):
         
         queryset = super().get_queryset()
         
-        # Optimizuotas prefetch sales_invoices sąrašui (naudojamas get_first_sales_invoice ir get_sales_invoices_count)
+        # Optimizuotas prefetch sales_invoices ir purchase_invoices sąrašui
         from django.db.models import Prefetch
-        from apps.invoices.models import SalesInvoice
+        from apps.invoices.models import SalesInvoice, PurchaseInvoice
         try:
             queryset = queryset.prefetch_related(
-                Prefetch('sales_invoices', queryset=SalesInvoice.objects.only('id', 'invoice_number', 'invoice_type', 'amount_total', 'issue_date', 'due_date', 'related_order_id').order_by('id'))
+                Prefetch('sales_invoices', queryset=SalesInvoice.objects.only(
+                    'id', 'invoice_number', 'invoice_type', 'amount_total', 'issue_date', 'due_date',
+                    'payment_status', 'payment_date', 'related_order_id', 'created_at'
+                ).order_by('created_at')),
+                Prefetch('purchase_invoices', queryset=PurchaseInvoice.objects.only(
+                    'id', 'payment_status', 'payment_date', 'due_date', 'partner_id', 'related_order_id'
+                )),
+                Prefetch('purchase_invoices_m2m', queryset=PurchaseInvoice.objects.only(
+                    'id', 'payment_status', 'payment_date', 'due_date', 'partner_id'
+                ))
             )
         except Exception as e:
             logger.error(f"Error in prefetch_related: {e}")
@@ -1878,14 +1910,15 @@ class OrderViewSet(viewsets.ModelViewSet):
                             if to_create:
                                 OtherCostType.objects.bulk_create(to_create, ignore_conflicts=True)
                     
-                    # 4. Generuoti order_number (jei įjungta automatinė numeracija)
-                    # select_for_update() užrakina seką iki transakcijos commit
+                    # 4. Generuoti order_number tik jei įjungta automatinė numeracija IR vartotojas neįrašė numerio ranka
+                    # Jei request jau turi order_number (įrašytas ranka), naudoti jį – neperrašyti automatiniu
+                    request_order_number = (self.request.data.get('order_number') or '').strip()
                     try:
                         order_settings = OrderSettings.load()
                     except Exception:
                         order_settings = None
                     
-                    if order_settings and order_settings.auto_numbering:
+                    if order_settings and order_settings.auto_numbering and not request_order_number:
                         width = order_settings.order_number_width or 3
                         order_number = generate_order_number(width=width)
                         serializer.validated_data['order_number'] = order_number
@@ -2671,9 +2704,11 @@ class OrderViewSet(viewsets.ModelViewSet):
                 use_ssl = config.smtp_port == 465
             
             # Siųsti el. laišką naudojant šabloną
-            # Paruošti context su order duomenimis
+            # Paruošti context su order duomenimis (užsakymo numeris, kliento numeris, maršrutas, datos, kainos)
+            from apps.settings.format_utils import format_money
             context = {
                 'order_number': order.order_number or 'N/A',
+                'client_order_number': getattr(order, 'client_order_number', None) or '',
                 'order_date': order.order_date.strftime('%Y-%m-%d') if order.order_date else 'N/A',
                 'partner_name': order.client.name if order.client else '',
                 'partner_code': order.client.code if order.client and hasattr(order.client, 'code') else '',
@@ -2682,8 +2717,8 @@ class OrderViewSet(viewsets.ModelViewSet):
                 'route_to': order.route_to or '',
                 'loading_date': order.loading_date.strftime('%Y-%m-%d') if order.loading_date else '',
                 'unloading_date': order.unloading_date.strftime('%Y-%m-%d') if order.unloading_date else '',
-                'price_net': str(order.price_net) if order.price_net else '0',
-                'price_with_vat': str(order.price_net * (1 + Decimal(order.vat_rate or 0) / 100)) if order.price_net and order.vat_rate else '0',
+                'price_net': format_money(order.price_net or 0),
+                'price_with_vat': format_money(order.price_net * (1 + Decimal(order.vat_rate or 0) / 100)) if order.price_net and order.vat_rate else format_money(0),
             }
             
             # Pridėti vadybininko informaciją jei yra
@@ -2976,6 +3011,24 @@ class OrderViewSet(viewsets.ModelViewSet):
                 'gaps_count': 0,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=False, methods=['get'])
+    def suggested_order_number(self, request):
+        """
+        Siūlomas naujo užsakymo numeris: pirmas trūkstamas (tarpas) arba kitas po didžiausio.
+        GET /api/orders/orders/suggested_order_number/
+        """
+        try:
+            suggested = get_suggested_order_number()
+            return Response({
+                'suggested_order_number': suggested or '',
+            })
+        except Exception as e:
+            logger.error(f"Klaida gaunant siūlomą užsakymo numerį: {e}", exc_info=True)
+            return Response(
+                {'suggested_order_number': '', 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class AutocompleteSuggestionViewSet(viewsets.ModelViewSet):

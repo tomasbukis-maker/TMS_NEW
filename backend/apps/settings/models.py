@@ -441,6 +441,32 @@ class InvoiceSettings(models.Model):
         default=True,
         verbose_name=_('Automatinis numeravimas')
     )
+    # Valiutos ir skaičių formatavimas
+    currency_code = models.CharField(
+        max_length=10,
+        default='EUR',
+        verbose_name=_('Valiutos kodas'),
+        help_text=_('Pvz.: EUR, USD, GBP')
+    )
+    currency_symbol = models.CharField(
+        max_length=10,
+        default='€',
+        blank=True,
+        verbose_name=_('Valiutos simbolis'),
+        help_text=_('Pvz.: €, $, £. Jei tuščias, rodomas valiutos kodas.')
+    )
+    decimal_places = models.IntegerField(
+        default=2,
+        validators=[MinValueValidator(0), MaxValueValidator(6)],
+        verbose_name=_('Skaitmenų po kablelio'),
+        help_text=_('Kiek skaitmenų po kablelio rodyti sumoms (0–6).')
+    )
+    decimal_separator = models.CharField(
+        max_length=1,
+        default=',',
+        choices=[(',', _('Kablelis (,)')), ('.', _('Taškas (.)'))],
+        verbose_name=_('Dešimtainis skyriklis')
+    )
     # Rodymo pasirinkimai pagal nutylėjimą
     default_display_options = models.JSONField(
         default=dict,
@@ -1069,19 +1095,24 @@ class EmailTemplate(models.Model):
         unique=True,
         verbose_name=_('Šablono tipas')
     )
+    _VARS_HELP = _(
+        'Kintamieji pagal šabloną. '
+        'Sąskaita/priminimai: {invoice_number}, {order_number}, {client_order_number}, {partner_name}, {amount}, {amount_net}, {amount_total}, {vat_rate}, {issue_date}, {due_date}, {overdue_days}, {payment_status}, {manager_name}, {other_unpaid_invoices}, {route_from}, {route_to}, {loading_date}, {unloading_date}, {order_date}. '
+        'Užsakymas klientui/vežėjui: {order_number}, {client_order_number}, {order_date}, {partner_name}, {partner_code}, {partner_vat_code}, {route_from}, {route_to}, {loading_date}, {unloading_date}, {price_net}, {price_with_vat}, {manager_name}; vežėjui dar {expedition_number}.'
+    )
     subject = models.CharField(
         max_length=512,
         verbose_name=_('Antraštė'),
-        help_text=_('El. laiško antraštė. Galite naudoti kintamuosius: {invoice_number}, {order_number}, {partner_name}, {amount}, {amount_net}, {amount_total}, {vat_rate}, {issue_date}, {due_date}, {overdue_days}, {payment_status}, {manager_name}, {other_unpaid_invoices}')
+        help_text=_VARS_HELP
     )
     body_text = models.TextField(
         verbose_name=_('Turinys (tekstas)'),
-        help_text=_('El. laiško turinys paprastu tekstu. Galite naudoti kintamuosius: {invoice_number}, {order_number}, {partner_name}, {amount}, {amount_net}, {amount_total}, {vat_rate}, {issue_date}, {due_date}, {overdue_days}, {payment_status}, {manager_name}, {other_unpaid_invoices}')
+        help_text=_VARS_HELP
     )
     body_html = models.TextField(
         blank=True,
         verbose_name=_('Turinys (HTML)'),
-        help_text=_('El. laiško turinys HTML formatu. Jei tuščias, bus naudojamas tekstinis turinys.')
+        help_text=_('El. laiško turinys HTML formatu. Naudokite tuos pačius kintamuosius kaip tekste. Jei tuščias, bus naudojamas tekstinis turinys.')
     )
     is_active = models.BooleanField(
         default=True,

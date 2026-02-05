@@ -24,91 +24,66 @@ const TEMPLATE_TYPES: { value: EmailTemplate['template_type']; label: string }[]
   { value: 'invoice_to_client', label: 'Sąskaita klientui' },
 ];
 
-// Kintamieji pagal šablono tipą
-const TEMPLATE_VARIABLES: Record<EmailTemplate['template_type'], string[]> = {
-  reminder_due_soon: [
-    '{invoice_number} - Sąskaitos numeris',
-    '{partner_name} - Partnerio/kliento vardas',
-    '{amount} - Suma be PVM',
-    '{amount_with_vat} - Suma su PVM',
-    '{other_unpaid_invoices} - Kitos neapmokėtos sąskaitos (formatuotas sąrašas)',
-    '{vat_amount} - PVM suma',
-    '{due_date} - Mokėjimo terminas',
-    '{issue_date} - Sąskaitos išrašymo data',
-    '{partner_code} - Partnerio kodas',
-    '{partner_vat_code} - Partnerio PVM kodas',
-  ],
-  reminder_unpaid: [
-    '{invoice_number} - Sąskaitos numeris',
-    '{partner_name} - Partnerio/kliento vardas',
-    '{amount} - Suma be PVM',
-    '{amount_with_vat} - Suma su PVM',
-    '{other_unpaid_invoices} - Kitos neapmokėtos sąskaitos (formatuotas sąrašas)',
-    '{vat_amount} - PVM suma',
-    '{due_date} - Mokėjimo terminas',
-    '{issue_date} - Sąskaitos išrašymo data',
-    '{partner_code} - Partnerio kodas',
-    '{partner_vat_code} - Partnerio PVM kodas',
-  ],
-  reminder_overdue: [
-    '{invoice_number} - Sąskaitos numeris',
-    '{partner_name} - Partnerio/kliento vardas',
-    '{amount} - Suma be PVM',
-    '{amount_with_vat} - Suma su PVM',
-    '{other_unpaid_invoices} - Kitos neapmokėtos sąskaitos (formatuotas sąrašas)',
-    '{vat_amount} - PVM suma',
-    '{due_date} - Mokėjimo terminas',
-    '{issue_date} - Sąskaitos išrašymo data',
-    '{overdue_days} - Vėlavimo dienos',
-    '{partner_code} - Partnerio kodas',
-    '{partner_vat_code} - Partnerio PVM kodas',
-  ],
-  order_to_client: [
-    '{order_number} - Užsakymo numeris',
-    '{partner_name} - Kliento vardas',
-    '{route_from} - Maršrutas iš',
-    '{route_to} - Maršrutas į',
-    '{loading_date} - Pakrovimo data',
-    '{unloading_date} - Iškrovimo data',
-    '{order_date} - Užsakymo data',
-    '{price_net} - Kaina be PVM',
-    '{price_with_vat} - Kaina su PVM',
-    '{partner_code} - Partnerio kodas',
-    '{partner_vat_code} - Partnerio PVM kodas',
-  ],
-  order_to_carrier: [
-    '{order_number} - Užsakymo numeris',
-    '{partner_name} - Vežėjo vardas',
-    '{route_from} - Maršrutas iš',
-    '{route_to} - Maršrutas į',
-    '{loading_date} - Pakrovimo data',
-    '{unloading_date} - Iškrovimo data',
-    '{order_date} - Užsakymo data',
-    '{price_net} - Kaina be PVM',
-    '{expedition_number} - Ekspedicijos numeris',
-    '{partner_code} - Partnerio kodas',
-    '{partner_vat_code} - Partnerio PVM kodas',
-  ],
-  invoice_to_client: [
-    '{invoice_number} - Sąskaitos numeris',
-    '{partner_name} - Kliento vardas',
-    '{amount} - Suma be PVM',
-    '{amount_with_vat} - Suma su PVM',
-    '{vat_amount} - PVM suma',
-    '{vat_rate} - PVM tarifas (%)',
-    '{due_date} - Mokėjimo terminas',
-    '{issue_date} - Sąskaitos išrašymo data',
-    '{order_number} - Susieto užsakymo numeris',
-    '{partner_code} - Partnerio kodas',
-    '{partner_vat_code} - Partnerio PVM kodas',
-  ],
-};
-
-// Bendri kintamieji visiems šablonams
-const COMMON_VARIABLES = [
-  '{signature} - El. laiškų pasirašymas (iš nustatymų)',
-  '{auto_generated_notice} - Pranešimas apie automatinį generavimą (iš nustatymų)',
-  '{contact_manager_notice} - Pranešimas apie vadybininką (iš nustatymų)',
+// Visi galimi kintamieji – sugrupuoti, be dubliavimosi; prieinami visuose šablonuose
+const VARIABLES_GROUPED: { group: string; variables: string[] }[] = [
+  {
+    group: 'Sąskaita',
+    variables: [
+      '{invoice_number} - Sąskaitos numeris',
+      '{issue_date} - Sąskaitos išrašymo data',
+      '{due_date} - Mokėjimo terminas',
+      '{amount} - Suma (su valiuta)',
+      '{amount_net} - Suma be PVM',
+      '{amount_total} - Suma su PVM',
+      '{vat_rate} - PVM tarifas (%)',
+      '{payment_status} - Mokėjimo būsena',
+      '{other_unpaid_invoices} - Kitos neapmokėtos sąskaitos',
+      '{overdue_days} - Vėlavimo dienos',
+    ],
+  },
+  {
+    group: 'Užsakymas',
+    variables: [
+      '{order_number} - Užsakymo numeris',
+      '{client_order_number} - Užsakovo užsakymo numeris',
+      '{order_date} - Užsakymo data',
+      '{expedition_number} - Ekspedicijos numeris',
+    ],
+  },
+  {
+    group: 'Maršrutas ir datos',
+    variables: [
+      '{route_from} - Pakrovimo vieta',
+      '{route_to} - Iškrovimo vieta',
+      '{loading_date} - Pakrovimo data',
+      '{unloading_date} - Iškrovimo data',
+    ],
+  },
+  {
+    group: 'Partneris',
+    variables: [
+      '{partner_name} - Partnerio vardas',
+      '{partner_code} - Partnerio kodas',
+      '{partner_vat_code} - Partnerio PVM kodas',
+    ],
+  },
+  {
+    group: 'Kainos / sumos',
+    variables: [
+      '{price_net} - Kaina be PVM',
+      '{price_with_vat} - Kaina su PVM',
+    ],
+  },
+  {
+    group: 'Kontaktai ir pasirašymas',
+    variables: [
+      '{manager_name} - Vadybininko vardas',
+      '{signature} - El. laiškų pasirašymas (iš nustatymų)',
+      '{auto_generated_notice} - Pranešimas apie automatinį generavimą',
+      '{contact_manager_notice} - Pranešimas apie vadybininką',
+      '{with_respect} - Su pagarba',
+    ],
+  },
 ];
 
 const EmailTemplatesForm: React.FC = () => {
@@ -403,88 +378,60 @@ const EmailTemplatesForm: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Dešinėje: Kintamieji */}
+                  {/* Dešinėje: Visi kintamieji (sugrupuoti, be dubliavimosi) */}
                   <div style={{ width: '350px', flexShrink: 0 }}>
                     <div style={{ padding: '16px', backgroundColor: '#e7f3ff', borderRadius: '8px', border: '1px solid #b3d9ff', position: 'sticky', top: '20px' }}>
                       <strong style={{ display: 'block', marginBottom: '12px', fontSize: '14px', color: '#004085' }}>
-                        Galimi kintamieji šiam šablonui:
+                        Visi kintamieji (prieinami visuose šablonuose):
                       </strong>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '16px', maxHeight: '400px', overflowY: 'auto' }}>
-                        {TEMPLATE_VARIABLES[template.template_type]?.map((variable, idx) => (
-                          <div key={idx} style={{ 
-                            padding: '6px 10px', 
-                            backgroundColor: '#fff', 
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            border: '1px solid #b3d9ff',
-                            cursor: 'pointer',
-                            transition: 'background-color 0.2s'
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f8ff'}
-                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
-                          onClick={() => {
-                            const variableName = variable.split(' - ')[0];
-                            const textareaId = `textarea-${template.template_type}`;
-                            const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
-                            if (textarea) {
-                              const start = textarea.selectionStart || 0;
-                              const end = textarea.selectionEnd || 0;
-                              const text = displayTemplate.body_text || '';
-                              const newText = text.substring(0, start) + variableName + text.substring(end);
-                              updateEditingTemplate('body_text', newText);
-                              setTimeout(() => {
-                                textarea.focus();
-                                textarea.setSelectionRange(start + variableName.length, start + variableName.length);
-                              }, 0);
-                            }
-                          }}
-                          title="Spustelėkite, kad įterptumėte į turinį"
-                          >
-                            <code style={{ color: '#0066cc', fontWeight: '600' }}>{variable.split(' - ')[0]}</code>
-                            <span style={{ color: '#6c757d', marginLeft: '8px' }}>{variable.split(' - ')[1]}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '500px', overflowY: 'auto' }}>
+                        {VARIABLES_GROUPED.map((grp, gidx) => (
+                          <div key={gidx}>
+                            <div style={{ fontSize: '11px', fontWeight: '700', color: '#004085', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                              {grp.group}
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              {grp.variables.map((variable, idx) => {
+                                const [name, label] = variable.includes(' - ') ? [variable.split(' - ')[0], variable.split(' - ').slice(1).join(' - ')] : [variable, ''];
+                                return (
+                                  <div
+                                    key={`${gidx}-${idx}`}
+                                    style={{
+                                      padding: '5px 8px',
+                                      backgroundColor: '#fff',
+                                      borderRadius: '4px',
+                                      fontSize: '12px',
+                                      border: '1px solid #b3d9ff',
+                                      cursor: 'pointer',
+                                      transition: 'background-color 0.2s',
+                                    }}
+                                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#f0f8ff'; }}
+                                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff'; }}
+                                    onClick={() => {
+                                      const textareaId = `textarea-${template.template_type}`;
+                                      const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
+                                      if (textarea) {
+                                        const start = textarea.selectionStart || 0;
+                                        const end = textarea.selectionEnd || 0;
+                                        const text = displayTemplate.body_text || '';
+                                        const newText = text.substring(0, start) + name + text.substring(end);
+                                        updateEditingTemplate('body_text', newText);
+                                        setTimeout(() => {
+                                          textarea.focus();
+                                          textarea.setSelectionRange(start + name.length, start + name.length);
+                                        }, 0);
+                                      }
+                                    }}
+                                    title="Spustelėkite, kad įterptumėte į turinį"
+                                  >
+                                    <code style={{ color: '#0066cc', fontWeight: '600' }}>{name}</code>
+                                    {label && <span style={{ color: '#6c757d', marginLeft: '6px' }}>{label}</span>}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         ))}
-                      </div>
-                      <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #b3d9ff' }}>
-                        <strong style={{ display: 'block', marginBottom: '12px', fontSize: '14px', color: '#004085' }}>
-                          Bendri kintamieji (visiems šablonams):
-                        </strong>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '200px', overflowY: 'auto' }}>
-                          {COMMON_VARIABLES.map((variable, idx) => (
-                            <div key={idx} style={{ 
-                              padding: '6px 10px', 
-                              backgroundColor: '#fff', 
-                              borderRadius: '4px',
-                              fontSize: '12px',
-                              border: '1px solid #b3d9ff',
-                              cursor: 'pointer',
-                              transition: 'background-color 0.2s'
-                            }}
-                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f0f8ff'}
-                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#fff'}
-                            onClick={() => {
-                              const variableName = variable.split(' - ')[0];
-                              const textareaId = `textarea-${template.template_type}`;
-                              const textarea = document.getElementById(textareaId) as HTMLTextAreaElement;
-                              if (textarea) {
-                                const start = textarea.selectionStart || 0;
-                                const end = textarea.selectionEnd || 0;
-                                const text = displayTemplate.body_text || '';
-                                const newText = text.substring(0, start) + variableName + text.substring(end);
-                                updateEditingTemplate('body_text', newText);
-                                setTimeout(() => {
-                                  textarea.focus();
-                                  textarea.setSelectionRange(start + variableName.length, start + variableName.length);
-                                }, 0);
-                              }
-                            }}
-                            title="Spustelėkite, kad įterptumėte į turinį"
-                            >
-                              <code style={{ color: '#0066cc', fontWeight: '600' }}>{variable.split(' - ')[0]}</code>
-                              <span style={{ color: '#6c757d', marginLeft: '8px' }}>{variable.split(' - ')[1]}</span>
-                            </div>
-                          ))}
-                        </div>
                       </div>
                     </div>
                   </div>

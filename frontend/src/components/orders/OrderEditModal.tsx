@@ -7,6 +7,7 @@ import RouteContactField from '../RouteContactField';
 import CarrierModal from './CarrierModal';
 import CargoItemModal from './CargoItemModal';
 import PartnerEditModal from '../partners/PartnerEditModal';
+import { formatMoney } from '../../utils/formatMoney';
 
 
 // Paprastas modal naujam klientui kurti
@@ -640,7 +641,7 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
 
     try {
       const response = await api.get('/partners/partners/', {
-        params: { search: query, page_size: 10 }
+        params: { search: query, page_size: 10, include_code_errors: 1 }
       });
       const clientsData = response.data.results || response.data || [];
       setClients(Array.isArray(clientsData) ? clientsData : []);
@@ -1859,6 +1860,9 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
                           onClick={() => handleClientSelect(client)}
                         >
                           {client.name} ({client.code})
+                          {((client as any).has_code_errors || (client as any).code_valid === false || (client as any).vat_code_valid === false) && (
+                            <span style={{ fontSize: '10px', color: '#c0392b', fontWeight: 600, marginLeft: '4px' }} title="Trūksta rekvizitų">(Trūksta duomenų)</span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -2140,7 +2144,7 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
                       type="text"
                       value={(() => {
                         const total = orderCarriers.reduce((sum, c) => sum + (c.price_net ? parseFloat(String(c.price_net)) : 0), 0);
-                        return `${total.toFixed(2)} EUR`;
+                        return formatMoney(total);
                       })()}
                       disabled
                       style={{ width: '100%', padding: '4px 6px', fontSize: '11px', backgroundColor: '#f9f9f9', cursor: 'not-allowed' }}
@@ -2154,7 +2158,7 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
                       type="text"
                       value={(() => {
                         const total = formData.other_costs.reduce((sum, c) => sum + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0);
-                        return `${total.toFixed(2)} EUR`;
+                        return formatMoney(total);
                       })()}
                       disabled
                       style={{ width: '100%', padding: '4px 6px', fontSize: '11px', backgroundColor: '#f9f9f9', cursor: 'not-allowed' }}
@@ -2338,7 +2342,7 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
                             {carrier.sequence_order + 1}. {carrier.carrier_type_display}: {carrier.partner?.name || 'Partneris nenurodytas'}
                           </div>
                           <div style={{ fontSize: '10px', color: '#666' }}>
-                            Kaina: {carrier.price_net ? `${parseFloat(String(carrier.price_net)).toFixed(2)} EUR` : 'Nenustatyta'}
+                            Kaina: {carrier.price_net ? formatMoney(carrier.price_net) : 'Nenustatyta'}
                             {carrier.route_from && carrier.route_to && (
                               <span style={{ marginLeft: '6px' }}>
                                 | {carrier.route_from} → {carrier.route_to}
@@ -2415,7 +2419,7 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
                           <div style={{ flex: 1 }}>
                             <div style={{ fontWeight: '500', marginBottom: '2px', fontSize: '11px' }}>{cost.description}</div>
                             <div style={{ fontSize: '10px', color: '#666' }}>
-                              {typeof cost.amount === 'number' ? cost.amount.toFixed(2) : parseFloat(String(cost.amount)).toFixed(2)} EUR
+                              {formatMoney(typeof cost.amount === 'number' ? cost.amount : cost.amount)}
                             </div>
                           </div>
                           <div style={{ display: 'flex', gap: '4px' }}>
@@ -2453,7 +2457,7 @@ const OrderEditModal: React.FC<OrderEditModalProps> = ({
                   {/* Bendras kitų išlaidų suma */}
                   {formData.other_costs.length > 0 && (
                     <div style={{ textAlign: 'right', fontSize: '11px', fontWeight: '500', color: '#666', marginTop: '4px' }}>
-                      Iš viso kitų išlaidų: {formData.other_costs.reduce((sum, c) => sum + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0).toFixed(2)} EUR
+                      Iš viso kitų išlaidų: {formatMoney(formData.other_costs.reduce((sum, c) => sum + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0))}
                     </div>
                   )}
               </div>

@@ -1,10 +1,14 @@
 #!/bin/bash
-# TMS Duomenų bazės sinchronizavimo skriptas (Local -> Server)
+# TMS Duomenų bazės sinchronizavimo skriptas (Local -> Server 100.112.219.50)
 
-# Nustatymai
-SSH_HOST="192.168.9.26"
-SSH_USER="tomas"
-export SSHPASS="asdfghjkl"
+set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Tas pats serveris kaip deploy_to_server.sh
+SERVER_HOST="100.112.219.50"
+SERVER_USER="admin_ai"
+export SSHPASS="${TMS_DEPLOY_PASS:-asdfghjkl_ai}"
 DATE=$(date +"%Y-%m-%d_%H-%M-%S")
 TEMP_DATA="backups/data_sync_$DATE.json"
 
@@ -29,20 +33,23 @@ fi
 
 # 2. Nusiųsti failą į serverį
 echo "🚚 Siunčiama į serverį..."
-sshpass -e scp -o StrictHostKeyChecking=no "$TEMP_DATA" "$SSH_USER@$SSH_HOST:/tmp/sync_data.json"
+sshpass -e scp -o StrictHostKeyChecking=no "$TEMP_DATA" "$SERVER_USER@$SERVER_HOST:/tmp/sync_data.json"
 
 # 3. Įkelti duomenis serveryje
 echo "⚙️  Atnaujinama duomenų bazės struktūra ir įkeliami duomenys..."
-sshpass -e ssh -o StrictHostKeyChecking=no "$SSH_USER@$SSH_HOST" << 'EOF_SERVER'
+sshpass -e ssh -o StrictHostKeyChecking=no "$SERVER_USER@$SERVER_HOST" << 'EOF_SERVER'
 cd /var/www/tms/backend
-source venv/bin/activate
+PY="/var/www/tms/backend/venv/bin/python"
 # 1. Pirmiausia sutvarkome struktūrą
 echo "🚀 Vykdomos migracijos..."
-python manage.py migrate
-# 2. Įkeliame duomenis
+$PY manage.py migrate
+# 2. Išvalome visą DB (flush), kad loaddata neįkeltų dublikatų
+echo "🧹 Išvalome serverio duomenų bazę (bus įkelti lokalūs duomenys)..."
+$PY manage.py flush --no-input
+# 3. Įkeliame duomenis
 echo "📥 Įkeliami duomenys..."
-python manage.py loaddata /tmp/sync_data.json
-rm /tmp/sync_data.json
+$PY manage.py loaddata /tmp/sync_data.json
+rm -f /tmp/sync_data.json
 echo "✅ Procesas serveryje baigtas!"
 EOF_SERVER
 

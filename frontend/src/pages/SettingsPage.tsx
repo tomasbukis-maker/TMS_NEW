@@ -28,6 +28,10 @@ interface InvoiceSettings {
   invoice_number_width: number;
   invoice_footer_text: string;
   auto_numbering: boolean;
+  currency_code?: string;
+  currency_symbol?: string;
+  decimal_places?: number;
+  decimal_separator?: string;
   last_invoice_number?: string | null;
   next_invoice_number?: string;
   next_invoice_number_edit?: string;
@@ -443,6 +447,10 @@ const SettingsPage: React.FC = () => {
     invoice_number_width: 7,
     invoice_footer_text: '',
     auto_numbering: true,
+    currency_code: 'EUR',
+    currency_symbol: '€',
+    decimal_places: 2,
+    decimal_separator: ',',
     default_display_options: {
       show_order_type: true,
       show_cargo_info: true,

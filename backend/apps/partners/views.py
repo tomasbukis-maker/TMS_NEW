@@ -28,7 +28,6 @@ class PartnerPageNumberPagination(PageNumberPagination):
 
 class PartnerViewSet(viewsets.ModelViewSet):
     """Partnerių CRUD operacijos"""
-    queryset = Partner.objects.select_related('contact_person').prefetch_related('contacts').annotate(contacts_count=Count('contacts')).all()
     serializer_class = PartnerSerializer
     pagination_class = PartnerPageNumberPagination
     permission_classes = [IsAuthenticated]
@@ -37,6 +36,30 @@ class PartnerViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'code', 'vat_code']
     ordering_fields = ['name', 'code', 'created_at']
     ordering = ['name']
+
+    def get_queryset(self):
+        qs = Partner.objects.select_related('contact_person').prefetch_related('contacts').annotate(contacts_count=Count('contacts'))
+        # Bendrame sąraše nerodome partnerių su kodo klaidomis; rodyti tik su filtru „Su klaidomis“
+        # include_code_errors=1 – rodyti visus (pvz. kliento paieška užsakymo formoje), kad galėtų pasirinkti ir vėliau sutvarkyti
+        code_errors = self.request.query_params.get('code_errors')
+        include_code_errors = self.request.query_params.get('include_code_errors') == '1'
+        if code_errors == 'only':
+            qs = qs.filter(has_code_errors=True)
+        elif not include_code_errors:
+            qs = qs.exclude(has_code_errors=True)
+        # Filtrai: su kontaktiniais asmenimis / be kontaktinių asmenų
+        has_contacts = self.request.query_params.get('has_contacts')
+        if has_contacts == '1':
+            qs = qs.filter(contacts_count__gt=0)
+        elif has_contacts == '0':
+            qs = qs.filter(contacts_count=0)
+        return qs.order_by('name')
+
+    @action(detail=False, methods=['get'])
+    def code_errors_count(self, request):
+        """Grąžina partnerių su kodo klaidomis skaičių (filtrui „Su klaidomis“)."""
+        count = Partner.objects.filter(has_code_errors=True).count()
+        return Response({'count': count})
 
     @action(detail=False, methods=['get'])
     def duplicates_preview(self, request):

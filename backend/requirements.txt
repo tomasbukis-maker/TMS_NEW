@@ -8,5 +8,7 @@ django-filter==23.5
 openpyxl==3.1.2
 xhtml2pdf==0.2.11
 weasyprint==66.0
+# Po pip install paleisti: playwright install chromium
+playwright==1.49.0
 PyPDF2==3.0.1
 

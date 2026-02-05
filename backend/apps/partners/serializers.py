@@ -1,6 +1,12 @@
 from rest_framework import serializers
 from .models import Partner, Contact
-from .utils import normalize_partner_code, fix_lithuanian_diacritics
+from .utils import (
+    normalize_partner_code,
+    fix_lithuanian_diacritics,
+    is_valid_company_code,
+    is_valid_vat_code,
+    get_company_code_format,
+)
 
 
 class ContactSerializer(serializers.ModelSerializer):
@@ -38,18 +44,22 @@ class PartnerSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     contacts = ContactSerializer(many=True, read_only=True)
     contacts_count = serializers.SerializerMethodField()
-    
+    code_valid = serializers.SerializerMethodField()
+    vat_code_valid = serializers.SerializerMethodField()
+    company_code_format = serializers.SerializerMethodField()
+
     class Meta:
         model = Partner
         fields = [
             'id', 'name', 'code', 'vat_code', 'address',
+            'code_valid', 'vat_code_valid', 'company_code_format', 'has_code_errors',
             'contact_person', 'contact_person_id', 'contacts', 'contacts_count', 'payment_term_days',
             'email_notify_due_soon', 'email_notify_unpaid', 'email_notify_overdue',
             'email_notify_manager_invoices',
             'status', 'status_display', 'is_supplier', 'is_client',
             'notes', 'created_at', 'updated_at'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'has_code_errors']
     
     def get_contacts_count(self, obj):
         """Grąžina kontaktų skaičių"""
@@ -58,6 +68,18 @@ class PartnerSerializer(serializers.ModelSerializer):
             return obj.contacts_count
         # Kitu atveju skaičiuojame
         return obj.contacts.count()
+
+    def get_code_valid(self, obj):
+        """Ar įmonės kodas atitinka formatą (9 skaitmenys)."""
+        return is_valid_company_code(obj.code or '')
+
+    def get_vat_code_valid(self, obj):
+        """Ar PVM kodas teisingas (tuščias; LT+9 arba LT+12 skaitmenų)."""
+        return is_valid_vat_code(obj.vat_code or '')
+
+    def get_company_code_format(self, obj):
+        """'current' (9 sk.), 'legacy' (7 sk.), arba null (netinkamas)."""
+        return get_company_code_format(obj.code or '')
     
     def validate(self, attrs):
         """Validacija: privalo būti arba klientas, arba tiekėjas"""

@@ -497,6 +497,39 @@ def get_first_available_order_gap_number(prefix: str = None, width: int = None):
     return f"{prefix}-{gap_start:0{width}d}"
 
 
+def get_suggested_order_number(prefix: str = None, width: int = None):
+    """
+    Siūlomas naujo užsakymo numeris: pirmiausia pirmas tarpas (trūkstamas numeris),
+    jei tarpų nėra – kitas numeris po didžiausio (max + 1).
+    Nenaudoja sekos – tik skaito egzistuojančius numerius.
+    """
+    # 1. Jei yra tarpas – siūlyti pirmą trūkstamą numerį
+    gap_number = get_first_available_order_gap_number(prefix=prefix, width=width)
+    if gap_number:
+        return gap_number
+    # 2. Tarpų nėra – siūlyti max + 1
+    from .models import Order
+    from apps.settings.models import OrderSettings
+    if prefix is None or width is None:
+        settings = OrderSettings.load()
+        if prefix is None:
+            prefix = settings.order_prefix.strip() if settings.order_prefix else str(datetime.now().year)
+        if width is None:
+            width = settings.order_number_width or 3
+    prefix = str(prefix).strip()
+    all_orders = Order.objects.filter(
+        order_number__isnull=False
+    ).exclude(order_number='').values_list('order_number', flat=True)
+    max_num = 0
+    for number in all_orders:
+        if not number:
+            continue
+        parsed_prefix, numeric_part = _parse_order_number(number)
+        if parsed_prefix and parsed_prefix == prefix and numeric_part is not None:
+            if numeric_part > max_num:
+                max_num = numeric_part
+    next_num = max_num + 1
+    return f"{prefix}-{next_num:0{width}d}"
 
 
 

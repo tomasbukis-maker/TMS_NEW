@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../../services/api';
+import { formatMoney } from '../../utils/formatMoney';
 import '../../pages/OrdersPage.css';
 import { ExpeditionDocument } from '../../types/expedition';
 import HTMLPreviewModal, { HTMLPreview } from '../common/HTMLPreviewModal';
@@ -272,10 +273,8 @@ const formatAmountLite = (value?: string | number | null) => {
     return '—';
   }
   const numeric = typeof value === 'number' ? value : parseFloat(String(value));
-  if (Number.isNaN(numeric)) {
-    return String(value);
-  }
-  return `${numeric.toFixed(2)} €`;
+  if (Number.isNaN(numeric)) return String(value);
+  return formatMoney(numeric);
 };
 
 const normalizeCarrierData = (carrier: OrderCarrier): OrderCarrier => ({
@@ -698,7 +697,7 @@ const OrderDetailsModal = ({
                     {(() => {
                       const price = localOrder.client_price_net || localOrder.calculated_client_price_net;
                       if (price) {
-                        return `${parseFloat(String(price)).toFixed(2)} €`;
+                        return formatMoney(price);
                       }
                       const transportCost = (localOrder.carriers || []).reduce((sum: number, c: OrderCarrier) => 
                         sum + (c.price_net ? parseFloat(String(c.price_net)) : 0), 0);
@@ -706,7 +705,7 @@ const OrderDetailsModal = ({
                       const otherCosts = (localOrder.other_costs || []).reduce((sum: number, c: OtherCost) => 
                         sum + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0);
                       const total = transportCost + myPrice + otherCosts;
-                      return total > 0 ? `${total.toFixed(2)} €` : <span style={{ color: '#999' }}>Nenustatyta</span>;
+                      return total > 0 ? formatMoney(total) : <span style={{ color: '#999' }}>Nenustatyta</span>;
                     })()}
                   </span>
                 </div>
@@ -728,10 +727,10 @@ const OrderDetailsModal = ({
                     return (
                       <>
                         <div style={{ fontSize: '12px', marginBottom: '4px', color: '#6c757d' }}>
-                          <strong>PVM ({vatRate}%):</strong> {vatAmount.toFixed(2)} €
+                          <strong>PVM ({vatRate}%):</strong> {formatMoney(vatAmount)}
                         </div>
                         <div style={{ fontSize: '12px' }}>
-                          <strong style={{ fontSize: '13px' }}>Su PVM:</strong> <span style={{ color: '#007bff', fontWeight: '600', fontSize: '13px' }}>{priceWithVat.toFixed(2)} €</span>
+                          <strong style={{ fontSize: '13px' }}>Su PVM:</strong> <span style={{ color: '#007bff', fontWeight: '600', fontSize: '13px' }}>{formatMoney(priceWithVat)}</span>
                         </div>
                       </>
                     );
@@ -1044,7 +1043,7 @@ const OrderDetailsModal = ({
                 )}
                 {localOrder.price_net && (
                   <div style={{ gridColumn: '1 / -1', fontSize: '12px', marginTop: '4px' }}>
-                    <strong>Bazinė kaina be PVM:</strong> {parseFloat(localOrder.price_net).toFixed(2)} €
+                    <strong>Bazinė kaina be PVM:</strong> {formatMoney(localOrder.price_net)}
                   </div>
                 )}
               </div>
@@ -1291,10 +1290,10 @@ const OrderDetailsModal = ({
                       {carrier.price_net && (
                         <div style={{ gridColumn: '1 / -1', fontSize: '11px', marginTop: '4px' }}>
                           <strong>Kaina be PVM:</strong> <span style={{ color: '#28a745', fontWeight: '600' }}>
-                            {parseFloat(carrier.price_net).toFixed(2)} €
+                            {formatMoney(carrier.price_net)}
                             {carrier.price_with_vat && (
                               <span style={{ marginLeft: '8px', color: '#007bff' }}>
-                                (su PVM: {parseFloat(carrier.price_with_vat).toFixed(2)} €)
+                                (su PVM: {formatMoney(carrier.price_with_vat)})
                               </span>
                             )}
                           </span>
@@ -1471,7 +1470,7 @@ const OrderDetailsModal = ({
                                   {amountValue !== null && !Number.isNaN(amountValue) && (
                                     <span>
                                       Suma:{' '}
-                                      <strong style={{ color: '#28a745' }}>{amountValue.toFixed(2)} €</strong>
+                                      <strong style={{ color: '#28a745' }}>{formatMoney(amountValue)}</strong>
                                     </span>
                                   )}
                                   {issueDateDisplay && (
@@ -1633,7 +1632,7 @@ const OrderDetailsModal = ({
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
                         <div>
-                          <span style={{ fontWeight: '500' }}>Suma: {cost.amount_with_vat || cost.amount_net || '0.00'} €</span>
+                          <span style={{ fontWeight: '500' }}>Suma: {formatMoney(cost.amount_with_vat || cost.amount_net || '0.00')}</span>
                           {cost.expedition_number && (
                             <div style={{ fontSize: '10px', color: '#17a2b8', fontWeight: 600, marginTop: '2px' }}>
                               Išlaidų numeris: {cost.expedition_number}
@@ -1718,7 +1717,7 @@ const OrderDetailsModal = ({
                         onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#28a745'}
                       >
                         <span>📄 {inv.invoice_number}</span>
-                        <span style={{ opacity: 0.9 }}>{parseFloat(inv.amount_total).toFixed(2)} €</span>
+                        <span style={{ opacity: 0.9 }}>{formatMoney(inv.amount_total)}</span>
                       </button>
                     ))}
                   </div>
@@ -1979,7 +1978,7 @@ const OrderDetailsModal = ({
                               <span>📄 {inv.received_invoice_number}</span>
                               <span style={{ fontSize: '10px', opacity: 0.9 }}>{inv.partner.name}</span>
                             </div>
-                            <span style={{ opacity: 0.9 }}>{parseFloat(inv.amount_total).toFixed(2)} €</span>
+                            <span style={{ opacity: 0.9 }}>{formatMoney(inv.amount_total)}</span>
                           </button>
                         ))}
                       </div>
@@ -2015,7 +2014,7 @@ const OrderDetailsModal = ({
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <span>📝 {document.invoice_number || 'Be numerio'}</span>
                                 {amountValue !== null && !Number.isNaN(amountValue) && (
-                                  <span style={{ fontWeight: 600 }}>{amountValue.toFixed(2)} €</span>
+                                  <span style={{ fontWeight: 600 }}>{formatMoney(amountValue)}</span>
                                 )}
                               </div>
                               <div style={{ fontSize: '10px', opacity: 0.9 }}>
@@ -2060,7 +2059,7 @@ const OrderDetailsModal = ({
                     }}>
                       <span style={{ color: '#495057', fontWeight: '500' }}>{cost.description || 'Išlaida'}</span>
                       <span style={{ fontWeight: '600', color: '#007bff' }}>
-                        {typeof cost.amount === 'number' ? cost.amount.toFixed(2) : parseFloat(String(cost.amount || 0)).toFixed(2)} €
+                        {formatMoney(typeof cost.amount === 'number' ? cost.amount : cost.amount || 0)}
                       </span>
                     </div>
                   ))}
@@ -2080,8 +2079,8 @@ const OrderDetailsModal = ({
                       {(() => {
                         const total = localOrder.other_costs!.reduce((sum: number, c: OtherCost) => 
                           sum + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0);
-                        return total.toFixed(2);
-                      })()} €
+                        return formatMoney(total);
+                      })()}
                     </span>
                   </div>
                 </div>

@@ -8,6 +8,7 @@ from django.conf import settings
 from apps.orders.models import Order
 from apps.invoices.models import SalesInvoice, PurchaseInvoice
 from apps.partners.models import Contact
+from apps.settings.format_utils import format_money
 
 from .models import MailAttachment, MailMessage, MailMessageTag, MailSender, MailSyncState, MailTag, EmailLog
 
@@ -97,7 +98,7 @@ class MailAttachmentSerializer(serializers.ModelSerializer):
                 'id': invoice.id,
                 'received_invoice_number': invoice.received_invoice_number,
                 'partner_name': invoice.partner.name if invoice.partner else None,
-                'amount_net': str(invoice.amount_net),
+                'amount_net': format_money(invoice.amount_net),
                 'issue_date': invoice.issue_date.isoformat() if invoice.issue_date else None,
             }
         return None
@@ -250,7 +251,11 @@ class MailMessageSerializer(serializers.ModelSerializer):
                 'expeditions': expeditions,
             }
 
-        # Fallback senesniems duomenims, kurie dar neturi išankstinių atitikčių
+        # Jei laiškas jau buvo „patikrintas“ (matches_computed_at), daugiau nebekuriame sunkių fallback – grąžiname None
+        if getattr(obj, 'matches_computed_at', None) is not None:
+            return None
+
+        # Fallback senesniems duomenims, kurie dar neturi matches_computed_at
         context = self.context or {}
         order_numbers = context.get('order_numbers')
         sales_numbers = context.get('sales_invoice_numbers')
@@ -363,7 +368,7 @@ class MailMessageSerializer(serializers.ModelSerializer):
             'id': invoice.id,
             'invoice_number': invoice.invoice_number,
             'partner': {'name': invoice.partner.name},
-            'amount_total': str(invoice.amount_total)
+            'amount_total': format_money(invoice.amount_total)
         } for invoice in obj.matched_sales_invoices.all()]
 
     def get_matched_purchase_invoices(self, obj: MailMessage):
@@ -372,7 +377,7 @@ class MailMessageSerializer(serializers.ModelSerializer):
             'id': invoice.id,
             'received_invoice_number': invoice.received_invoice_number,
             'partner': {'name': invoice.partner.name},
-            'amount_total': str(invoice.amount_total)
+            'amount_total': format_money(invoice.amount_total)
         } for invoice in obj.matched_purchase_invoices.all()]
 
     def get_recipients_display(self, obj: MailMessage) -> str:
@@ -428,7 +433,22 @@ class EmailLogSerializer(serializers.ModelSerializer):
     email_type_display = serializers.CharField(source='get_email_type_display', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     sent_by_username = serializers.CharField(source='sent_by.username', read_only=True)
-    
+    related_invoice_number = serializers.SerializerMethodField(read_only=True)
+
+    def get_related_invoice_number(self, obj):
+        """Vartotojui rodomas sąskaitos numeris (ne vidinis ID)."""
+        if not obj.related_invoice_id:
+            return None
+        from apps.invoices.models import SalesInvoice
+        from apps.invoices.models import PurchaseInvoice
+        inv = SalesInvoice.objects.filter(id=obj.related_invoice_id).values('invoice_number').first()
+        if inv:
+            return inv.get('invoice_number')
+        inv = PurchaseInvoice.objects.filter(id=obj.related_invoice_id).values('received_invoice_number').first()
+        if inv:
+            return inv.get('received_invoice_number')
+        return None
+
     class Meta:
         model = EmailLog
         fields = [
@@ -440,6 +460,7 @@ class EmailLogSerializer(serializers.ModelSerializer):
             'recipient_name',
             'related_order_id',
             'related_invoice_id',
+            'related_invoice_number',
             'related_expedition_id',
             'related_partner_id',
             'status',
@@ -459,6 +480,7 @@ class EmailLogSerializer(serializers.ModelSerializer):
             'email_type_display',
             'status_display',
             'sent_by_username',
+            'related_invoice_number',
             'created_at',
             'updated_at',
         ]

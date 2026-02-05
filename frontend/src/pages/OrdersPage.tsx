@@ -12,6 +12,7 @@ import AttachmentPreviewModal from '../components/common/AttachmentPreviewModal'
 import HTMLPreviewModal, { HTMLPreview } from '../components/common/HTMLPreviewModal';
 import { ExpeditionDocument } from '../types/expedition';
 import { useUISettings } from '../hooks/useUISettings';
+import { formatMoney } from '../utils/formatMoney';
 import './OrdersPage.css';
 
 const ORDER_STATUSES = [
@@ -414,7 +415,7 @@ const OrderClientPriceTooltip: React.FC<{
               {otherCosts.map((cost, idx) => (
                 <div key={idx} style={{ marginBottom: idx < otherCosts.length - 1 ? '6px' : '0', lineHeight: '1.4' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>{cost.description || 'Nenurodyta'}</div>
-                  <div>{parseFloat(String(cost.amount || 0)).toFixed(2)} EUR</div>
+                  <div>{formatMoney(cost.amount ?? 0)}</div>
                 </div>
               ))}
             </>
@@ -789,7 +790,8 @@ interface User {
 
 interface OtherCost {
   description: string;
-  amount: number;
+  amount: number | string;
+  visible_on_invoice?: boolean;
 }
 
 
@@ -819,6 +821,8 @@ type OrdersPageOrder = {
   vat_amount: string;
   client_price_with_vat: string | null;
   client_vat_amount: string | null;
+  /** Visų vežėjų kainų (be PVM) suma – iš backend */
+  carrier_price_net_total?: string | number | null;
   carrier_price_with_vat: string | null;
   carrier_vat_amount: string | null;
   client_invoice_issued: boolean;
@@ -1157,14 +1161,10 @@ const OrdersPage: React.FC = () => {
   const [showFilterClientDropdown, setShowFilterClientDropdown] = useState(false);
   const [showFilterCarrierDropdown, setShowFilterCarrierDropdown] = useState(false);
   const formatInvoiceAmount = useCallback((value: string | number | null | undefined) => {
-    if (value === null || value === undefined || value === '') {
-      return 'Nenurodyta';
-    }
-    const numeric = typeof value === 'number' ? value : parseFloat(value);
-    if (!Number.isNaN(numeric)) {
-      return `${numeric.toFixed(2)} €`;
-    }
-    return `${value} €`;
+    if (value === null || value === undefined || value === '') return 'Nenurodyta';
+    const numeric = typeof value === 'number' ? value : parseFloat(String(value));
+    if (Number.isNaN(numeric)) return `${value} EUR`;
+    return formatMoney(numeric);
   }, []);
 
   const [routeFromSuggestions, setRouteFromSuggestions] = useState<string[]>([]);
@@ -1301,7 +1301,7 @@ const OrdersPage: React.FC = () => {
   const fetchAllClients = useCallback(async () => {
     try {
       const response = await api.get('/partners/partners/', {
-        params: { is_client: true, page_size: 200 }
+        params: { is_client: true, page_size: 200, include_code_errors: 1 }
       });
       const clientsData = response.data.results || response.data || [];
       setAllClients(Array.isArray(clientsData) ? clientsData : []);
@@ -1314,7 +1314,7 @@ const OrdersPage: React.FC = () => {
   const fetchAllCarriers = useCallback(async () => {
     try {
       const response = await api.get('/partners/partners/', {
-        params: { page_size: 200 }
+        params: { page_size: 200, include_code_errors: 1 }
       });
       const carriersData = response.data.results || response.data || [];
       setAllCarriers(Array.isArray(carriersData) ? carriersData : []);
@@ -1333,7 +1333,8 @@ const OrdersPage: React.FC = () => {
         params: { 
           search: query, 
           is_client: true, 
-          page_size: 10 
+          page_size: 10,
+          include_code_errors: 1
         }
       });
       const clients = response.data.results || response.data || [];
@@ -1352,7 +1353,8 @@ const OrdersPage: React.FC = () => {
       const response = await api.get('/partners/partners/', {
         params: { 
           search: query, 
-          page_size: 10 
+          page_size: 10,
+          include_code_errors: 1
         }
       });
       const carriers = response.data.results || response.data || [];
@@ -2493,6 +2495,9 @@ const OrdersPage: React.FC = () => {
                               }}
                             >
                               {client.name} {client.code ? `(${client.code})` : ''}
+                              {((client as any).has_code_errors || (client as any).code_valid === false || (client as any).vat_code_valid === false) && (
+                                <span style={{ fontSize: '10px', color: '#c0392b', fontWeight: 600, marginLeft: '4px' }} title="Trūksta rekvizitų">(Trūksta duomenų)</span>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -2845,10 +2850,19 @@ const OrdersPage: React.FC = () => {
                     const clientPriceNet = order.client_price_net || order.calculated_client_price_net || 0;
                     const clientPriceColor = getPaymentColor(clientPaymentStatus);
                     
-                    // Vežėjo kaina (be PVM) - suma visų carriers kainų
-                    const carrierPriceNet = order.carriers && Array.isArray(order.carriers) 
-                      ? order.carriers.reduce((sum: number, c: any) => sum + (c.price_net ? parseFloat(String(c.price_net)) : 0), 0)
-                      : 0;
+                    // Vežėjo kaina (be PVM) – visų vežėjų kainų suma (prioritetas: backend carrier_price_net_total, tada suma iš carriers)
+                    let carrierPriceNet = 0;
+                    if (order.carrier_price_net_total != null && order.carrier_price_net_total !== '') {
+                      const v = parseFloat(String(order.carrier_price_net_total));
+                      carrierPriceNet = Number.isFinite(v) ? v : 0;
+                    } else if (order.carriers && Array.isArray(order.carriers)) {
+                      carrierPriceNet = order.carriers.reduce((sum: number, c: any) => {
+                        const val = c?.price_net;
+                        if (val == null || val === '') return sum;
+                        const n = parseFloat(String(val));
+                        return sum + (Number.isFinite(n) ? n : 0);
+                      }, 0);
+                    }
                     const carrierPriceColor = getPaymentColor(carrierPaymentStatus);
                     
                     // Kitos išlaidos
@@ -2860,6 +2874,9 @@ const OrdersPage: React.FC = () => {
                           return sum + amount;
                         }, 0)
                       : 0;
+                    
+                    // Kaina klientui su papildomomis išlaidomis (rodymui sąraše)
+                    const clientPriceNetWithOtherCosts = parseFloat(String(clientPriceNet)) + otherCosts;
                     
                     // Pelnas: visada apskaičiuoti pagal formulę, kad būtų teisingas
                     // client_price - carrier_costs - other_costs
@@ -3074,7 +3091,7 @@ const OrdersPage: React.FC = () => {
                         <td>
                           <OrderClientPriceTooltip order={order}>
                             <div style={{ color: clientPriceColor, fontWeight: '500' }}>
-                              {clientPriceNet ? parseFloat(String(clientPriceNet)).toFixed(2) : '0.00'} EUR
+                              {formatMoney(clientPriceNetWithOtherCosts)}
                             </div>
                           </OrderClientPriceTooltip>
                         </td>
@@ -3185,11 +3202,11 @@ const OrdersPage: React.FC = () => {
                         </td>
                         <td style={{ color: carrierPriceColor, fontWeight: '500' }}>
                           <CarrierPriceTooltip order={order}>
-                          {carrierPriceNet > 0 ? carrierPriceNet.toFixed(2) : '0.00'} EUR
+                          {formatMoney(carrierPriceNet > 0 ? carrierPriceNet : 0)}
                           </CarrierPriceTooltip>
                         </td>
                         <td style={{ fontWeight: '500', color: profit >= 0 ? '#28a745' : '#dc3545', whiteSpace: 'nowrap' }}>
-                          {profit.toFixed(2)} EUR
+                          {formatMoney(profit)}
                         </td>
                         <td onClick={(e) => e.stopPropagation()} style={{ width: '50px', minWidth: '50px' }}>
                           <div style={{ 
@@ -3647,9 +3664,9 @@ const OrdersPage: React.FC = () => {
                       const amountTotal = amountNet + vatAmount;
                       return (
                         <>
-                          <div><strong>Suma be PVM:</strong> {amountNet.toFixed(2)} €</div>
-                          <div><strong>PVM ({vatRate}%):</strong> {vatAmount.toFixed(2)} €</div>
-                          <div><strong>Suma su PVM:</strong> {amountTotal.toFixed(2)} €</div>
+                          <div><strong>Suma be PVM:</strong> {formatMoney(amountNet)}</div>
+                          <div><strong>PVM ({vatRate}%):</strong> {formatMoney(vatAmount)}</div>
+                          <div><strong>Suma su PVM:</strong> {formatMoney(amountTotal)}</div>
                         </>
                       );
                     })()}

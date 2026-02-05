@@ -3,6 +3,7 @@ import { format } from 'date-fns';
 import lt from 'date-fns/locale/lt';
 import './MailPage.css';
 import { api, partnersApi, contactsApi } from '../services/api';
+import { formatMoney } from '../utils/formatMoney';
 import AttachmentPreviewModal, { AttachmentPreview } from '../components/common/AttachmentPreviewModal';
 
 interface MailAttachment {
@@ -127,6 +128,7 @@ interface EmailLog {
   recipient_name: string;
   related_order_id: number | null;
   related_invoice_id: number | null;
+  related_invoice_number: string | null;
   related_expedition_id: number | null;
   related_partner_id: number | null;
   status: 'pending' | 'sent' | 'failed';
@@ -1806,7 +1808,7 @@ const MailPage: React.FC = () => {
                             📄 Pardavimo sąskaita {invoice.invoice_number}
                           </span>
                           <span style={{ marginLeft: '8px', color: '#666' }}>
-                            {invoice.partner.name} - {invoice.amount_total}€
+                            {invoice.partner.name} - {formatMoney(invoice.amount_total)}
                           </span>
                         </div>
                       ))}
@@ -1816,7 +1818,7 @@ const MailPage: React.FC = () => {
                             📄 Pirkimo sąskaita {invoice.received_invoice_number}
                           </span>
                           <span style={{ marginLeft: '8px', color: '#666' }}>
-                            {invoice.partner.name} - {invoice.amount_total}€
+                            {invoice.partner.name} - {formatMoney(invoice.amount_total)}
                           </span>
                         </div>
                       ))}
@@ -2139,8 +2141,10 @@ const MailPage: React.FC = () => {
                           const orderNumber = orderNumbersCacheRef.current[email.related_order_id];
                           relatedObjects.push(`Užsakymas ${orderNumber || `#${email.related_order_id}`}`);
                         }
-                        if (email.related_invoice_id) {
-                          relatedObjects.push(`Sąskaita #${email.related_invoice_id}`);
+                        if (email.related_invoice_id && email.related_invoice_number) {
+                          relatedObjects.push(`Sąskaita ${email.related_invoice_number}`);
+                        } else if (email.related_invoice_id) {
+                          relatedObjects.push('Sąskaita');
                         }
                         if (email.related_expedition_id) {
                           const expeditionNumber = expeditionNumbersCacheRef.current[email.related_expedition_id];
@@ -2530,9 +2534,9 @@ const MailPage: React.FC = () => {
                         Užsakymas {orderNumbersCacheRef.current[selectedSentEmail.related_order_id] || `#${selectedSentEmail.related_order_id}`}
                       </span>
                     )}
-                    {selectedSentEmail.related_invoice_id && (
+                    {(selectedSentEmail.related_invoice_id || selectedSentEmail.related_invoice_number) && (
                       <span style={{ padding: '4px 8px', backgroundColor: '#e9ecef', borderRadius: '4px', fontSize: '12px' }}>
-                        Sąskaita #{selectedSentEmail.related_invoice_id}
+                        Sąskaita {selectedSentEmail.related_invoice_number || '(numeris nežinomas)'}
                       </span>
                     )}
                     {selectedSentEmail.related_expedition_id && (

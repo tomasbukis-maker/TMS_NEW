@@ -1,0 +1,231 @@
+.appsas-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.appsas-header {
+  margin-bottom: 24px;
+}
+
+.appsas-header h1 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.appsas-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: #666;
+}
+
+.appsas-loading,
+.appsas-empty {
+  text-align: center;
+  padding: 48px 24px;
+  color: #666;
+  font-size: 15px;
+}
+
+.appsas-message {
+  padding: 12px 16px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.appsas-message--success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.appsas-message--error {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.appsas-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .appsas-content {
+    grid-template-columns: 1fr;
+  }
+}
+
+.appsas-sender-card {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.appsas-sender-count {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.appsas-field {
+  margin-bottom: 14px;
+}
+
+.appsas-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #495057;
+  margin-bottom: 4px;
+}
+
+.appsas-email {
+  font-size: 15px;
+  color: #212529;
+  word-break: break-all;
+}
+
+.appsas-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid #ced4da;
+  border-radius: 6px;
+  font-size: 14px;
+  box-sizing: border-box;
+}
+
+.appsas-input:focus {
+  outline: none;
+  border-color: #007bff;
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
+}
+
+.appsas-client-section {
+  background: #fff;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+.appsas-partner-list {
+  list-style: none;
+  margin: 8px 0 0 0;
+  padding: 0;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.appsas-partner-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.appsas-partner-item:last-child {
+  border-bottom: none;
+}
+
+.appsas-partner-item:hover,
+.appsas-partner-item.selected {
+  background: #e7f3ff;
+}
+
+.appsas-partner-name {
+  font-weight: 500;
+}
+
+.appsas-partner-code {
+  font-size: 12px;
+  color: #666;
+}
+
+.appsas-selected {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #e7f3ff;
+  border-radius: 6px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.appsas-clear-partner {
+  padding: 4px 10px;
+  font-size: 12px;
+  background: #6c757d;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.appsas-clear-partner:hover {
+  background: #5a6268;
+}
+
+.appsas-add-btn {
+  margin-top: 16px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #007bff;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.appsas-add-btn:hover:not(:disabled) {
+  background: #0056b3;
+}
+
+.appsas-add-btn:disabled {
+  background: #adb5bd;
+  cursor: not-allowed;
+}
+
+.appsas-nav {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+.appsas-nav-btn {
+  padding: 8px 16px;
+  font-size: 14px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.appsas-nav-btn:hover:not(:disabled) {
+  background: #e9ecef;
+}
+
+.appsas-nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.appsas-nav-info {
+  font-size: 14px;
+  color: #666;
+}

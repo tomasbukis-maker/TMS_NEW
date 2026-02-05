@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next';
 import { api } from '../../services/api';
 import PaymentService from '../../services/paymentService';
+import { formatMoney } from '../../utils/formatMoney';
 import HTMLPreviewModal, { HTMLPreview } from '../common/HTMLPreviewModal';
 import '../../pages/InvoicesPage.css';
 
@@ -34,6 +35,7 @@ interface Order {
   client?: Partner;
   client_price_net?: string | number | null;
   calculated_client_price_net?: string | number | null;
+  other_costs?: Array<{ description?: string; amount?: number | string }>;
   vat_rate?: string | number | null;
   route_from?: string;
   route_to?: string;
@@ -44,6 +46,20 @@ interface Order {
   unloading_date_from?: string;
   unloading_date_to?: string;
   suggested_amount_net?: string | null;
+}
+
+/** Kliento kaina be PVM + papildomos išlaidos (kaina sąskaitai). Priima Order arba placeholder su null laukais. */
+function getOrderAmountForInvoice(order: {
+  client_price_net?: string | number | null;
+  calculated_client_price_net?: string | number | null;
+  other_costs?: Array<{ description?: string; amount?: number | string }>;
+}): number {
+  const base = order.client_price_net ?? order.calculated_client_price_net ?? 0;
+  const baseNum = parseFloat(String(base)) || 0;
+  const other = (order.other_costs && Array.isArray(order.other_costs))
+    ? order.other_costs.reduce((s, c) => s + (typeof c.amount === 'number' ? c.amount : parseFloat(String(c.amount)) || 0), 0)
+    : 0;
+  return baseNum + other;
 }
 
 interface InvoiceItem {
@@ -94,6 +110,7 @@ interface SalesInvoice {
     show_prices?: boolean;
     show_my_price?: boolean;
     show_other_costs?: boolean;
+    show_loading_unloading_info?: boolean;
   };
   created_at?: string;
   updated_at?: string;
@@ -126,6 +143,7 @@ interface SalesInvoiceModalProps {
       show_prices?: boolean;
       show_my_price?: boolean;
       show_other_costs?: boolean;
+      show_loading_unloading_info?: boolean;
     };
   } | null;
 }
@@ -161,6 +179,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
     related_order_id: '',
     invoice_type: 'final' as 'pre_invoice' | 'final' | 'credit' | 'proforma',
     payment_status: 'unpaid' as 'unpaid' | 'paid' | 'overdue' | 'partially_paid',
+    vat_rate: '21',
     amount_net: '',
     issue_date: new Date().toISOString().split('T')[0],
     due_date: (() => {
@@ -185,6 +204,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       show_prices: true,
       show_my_price: true,
       show_other_costs: true,
+      show_loading_unloading_info: false,
     } as {
       show_order_type: boolean;
       show_cargo_info: boolean;
@@ -199,6 +219,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       show_prices: boolean;
       show_my_price: boolean;
       show_other_costs: boolean;
+      show_loading_unloading_info: boolean;
     },
   });
   
@@ -231,6 +252,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
   const initialFormDataRef = useRef<any>(null);
   const initialAdditionalOrderIdsRef = useRef<number[]>([]);
   const isInitializingRef = useRef(false);
+  const initialCaptureDoneRef = useRef(false);
   
   // Initialize form when modal opens
   useEffect(() => {
@@ -238,11 +260,13 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       setActiveTab('pagrindinis');
       setHasUnsavedChanges(false);
       isInitializingRef.current = false;
+      initialCaptureDoneRef.current = false;
       return;
     }
     
     // Set initializing flag when modal opens
     isInitializingRef.current = true;
+    initialCaptureDoneRef.current = false;
     
     if (!invoice) {
       // Create mode
@@ -320,12 +344,18 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
             
             missingOrders.forEach((order: any) => {
               if (!existingOrderIds.has(order.id)) {
+                const base = order.client_price_net ?? order.calculated_client_price_net ?? 0;
+                const otherSum = (order.other_costs && Array.isArray(order.other_costs))
+                  ? order.other_costs.reduce((s: number, c: any) => s + (typeof c?.amount === 'number' ? c.amount : parseFloat(String(c?.amount)) || 0), 0)
+                  : 0;
+                const totalAmount = (parseFloat(String(base)) || 0) + otherSum;
                 results.push({
                   id: order.id,
                   order_number: order.order_number || `Užsakymas #${order.id}`,
                   client_price_net: order.client_price_net ? String(order.client_price_net) : null,
                   calculated_client_price_net: order.calculated_client_price_net ? String(order.calculated_client_price_net) : null,
-                  suggested_amount_net: order.client_price_net ? String(order.client_price_net) : (order.calculated_client_price_net ? String(order.calculated_client_price_net) : null),
+                  other_costs: order.other_costs || undefined,
+                  suggested_amount_net: totalAmount > 0 ? String(totalAmount) : (order.client_price_net ? String(order.client_price_net) : (order.calculated_client_price_net ? String(order.calculated_client_price_net) : null)),
                   vat_rate: order.vat_rate ? String(order.vat_rate) : null,
                   route_from: order.route_from || null,
                   route_to: order.route_to || null,
@@ -363,6 +393,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       related_order_id: invoiceData.related_order_id?.toString() || invoiceData.related_order?.id.toString() || '',
       invoice_type: invoiceData.invoice_type,
       payment_status: invoiceData.payment_status,
+      vat_rate: invoiceData.vat_rate != null && invoiceData.vat_rate !== '' ? String(invoiceData.vat_rate) : '21',
       amount_net: invoiceData.amount_net,
       issue_date: invoiceData.issue_date ? (invoiceData.issue_date.includes('T') ? invoiceData.issue_date.split('T')[0] : invoiceData.issue_date.split(' ')[0]) : '',
       due_date: invoiceData.due_date ? (invoiceData.due_date.includes('T') ? invoiceData.due_date.split('T')[0] : invoiceData.due_date.split(' ')[0]) : '',
@@ -382,6 +413,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
         show_prices: invoiceData.display_options.show_prices ?? true,
         show_my_price: invoiceData.display_options.show_my_price ?? true,
         show_other_costs: invoiceData.display_options.show_other_costs ?? true,
+        show_loading_unloading_info: invoiceData.display_options.show_loading_unloading_info ?? false,
       } : {
         show_order_type: true,
         show_cargo_info: true,
@@ -396,6 +428,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
         show_prices: true,
         show_my_price: true,
         show_other_costs: true,
+        show_loading_unloading_info: false,
       },
     });
     
@@ -424,6 +457,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       related_order_id: invoiceData.related_order_id?.toString() || invoiceData.related_order?.id.toString() || '',
       invoice_type: invoiceData.invoice_type,
       payment_status: invoiceData.payment_status,
+      vat_rate: invoiceData.vat_rate != null && invoiceData.vat_rate !== '' ? String(invoiceData.vat_rate) : '21',
       amount_net: invoiceData.amount_net,
       issue_date: invoiceData.issue_date ? (invoiceData.issue_date.includes('T') ? invoiceData.issue_date.split('T')[0] : invoiceData.issue_date.split(' ')[0]) : '',
       due_date: invoiceData.due_date ? (invoiceData.due_date.includes('T') ? invoiceData.due_date.split('T')[0] : invoiceData.due_date.split(' ')[0]) : '',
@@ -443,6 +477,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
         show_prices: true,
         show_my_price: true,
         show_other_costs: true,
+        show_loading_unloading_info: false,
       },
     }));
     initialAdditionalOrderIdsRef.current = [...additionalIds];
@@ -459,6 +494,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       related_order_id: initialOrderId || '',
       invoice_type: 'final',
       payment_status: 'unpaid',
+      vat_rate: '21',
       amount_net: '',
       issue_date: new Date().toISOString().split('T')[0],
       due_date: (() => {
@@ -482,7 +518,8 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
         show_carrier_dates: defaultDisplayOptions.show_carrier_dates ?? false,
         show_prices: defaultDisplayOptions.show_prices ?? false,
         show_my_price: defaultDisplayOptions.show_my_price ?? false,
-        show_other_costs: defaultDisplayOptions.show_other_costs ?? false,
+show_other_costs: defaultDisplayOptions.show_other_costs ?? true,
+    show_loading_unloading_info: defaultDisplayOptions.show_loading_unloading_info ?? false,
       },
     });
     setSelectedPartnerName('');
@@ -522,7 +559,8 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
         show_carrier_dates: defaultDisplayOptions.show_carrier_dates ?? false,
         show_prices: defaultDisplayOptions.show_prices ?? false,
         show_my_price: defaultDisplayOptions.show_my_price ?? false,
-        show_other_costs: defaultDisplayOptions.show_other_costs ?? false,
+show_other_costs: defaultDisplayOptions.show_other_costs ?? true,
+    show_loading_unloading_info: defaultDisplayOptions.show_loading_unloading_info ?? false,
       },
     };
     initialFormDataRef.current = JSON.parse(JSON.stringify(initialFormData));
@@ -582,21 +620,8 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
     }
     return ids.reduce((total, id) => {
       const order = orders.find((o) => o.id === id);
-      if (!order) {
-        return total;
-      }
-      const candidate =
-        order.suggested_amount_net ??
-        order.client_price_net ??
-        order.calculated_client_price_net;
-      if (candidate === null || candidate === undefined || candidate === '') {
-        return total;
-      }
-      const parsed = parseFloat(String(candidate));
-      if (Number.isNaN(parsed)) {
-        return total;
-      }
-      return total + parsed;
+      if (!order) return total;
+      return total + getOrderAmountForInvoice(order);
     }, 0);
   }, [primaryOrderIdNumber, selectedAdditionalOrderIds, orders]);
   
@@ -624,6 +649,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       initialFormDataRef.current = null;
       initialAdditionalOrderIdsRef.current = [];
       isInitializingRef.current = false;
+      initialCaptureDoneRef.current = false;
       setHasUnsavedChanges(false);
       return;
     }
@@ -633,7 +659,16 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       return;
     }
     
-    // After initialization, compare current values with initial values
+    // After init: first run – nustatyti baseline iš dabartinio formData (po visų effect'ų), kad nepraneštų „neišsaugota“ tik atidarius
+    if (initialFormDataRef.current && !initialCaptureDoneRef.current) {
+      initialFormDataRef.current = JSON.parse(JSON.stringify(formData));
+      initialAdditionalOrderIdsRef.current = [...selectedAdditionalOrderIds];
+      initialCaptureDoneRef.current = true;
+      setHasUnsavedChanges(false);
+      return;
+    }
+    
+    // Po to lyginti su baseline
     if (initialFormDataRef.current) {
       const formDataChanged = JSON.stringify(formData) !== JSON.stringify(initialFormDataRef.current);
       const additionalOrdersChanged = JSON.stringify([...selectedAdditionalOrderIds].sort()) !== JSON.stringify([...initialAdditionalOrderIdsRef.current].sort());
@@ -655,7 +690,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
     
     try {
       const response = await api.get('/partners/partners/', {
-        params: { search: query, is_client: true, page_size: 20 }
+        params: { search: query, is_client: true, page_size: 20, include_code_errors: 1 }
       });
       const results = response.data.results || response.data;
       setPartners(results.filter((p: Partner) => p.name.toLowerCase().includes(query.toLowerCase())));
@@ -730,6 +765,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       const data: any = {
         partner_id: parseInt(formData.partner_id),
         invoice_type: formData.invoice_type,
+        vat_rate: parseFloat(formData.vat_rate) || 0,
         // payment_status NESIUNČIAME - jis keičiamas TIK per mokėjimų valdymą
         amount_net: amountNetToSend,
         issue_date: formData.issue_date || null,
@@ -784,12 +820,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
     onClose();
   };
   
-  // Format currency
-  const formatCurrency = (value: string | number | undefined | null, fallback = '0.00 €') => {
-    if (value === undefined || value === null || value === '') return fallback;
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? `${numeric.toFixed(2)} €` : fallback;
-  };
+  const formatCurrency = (value: string | number | undefined | null) => formatMoney(value);
   
   // Format date
   const formatDate = (dateStr: string | null | undefined) => {
@@ -875,29 +906,6 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
       onSave(); // Trigger parent refresh
     } catch (error: any) {
       showToast('error', error.response?.data?.error || 'Klaida atnaujinant eilutės rodymo statusą');
-    }
-  };
-
-  // Handle display option change (show_order_type)
-  const handleDisplayOptionChange = async (option: 'show_order_type', value: boolean) => {
-    if (!localInvoice?.id) return;
-    
-    try {
-      const updatedOptions = {
-        ...localInvoice.display_options,
-        [option]: value
-      };
-      await api.patch(`/invoices/sales/${localInvoice.id}/`, {
-        display_options: updatedOptions
-      });
-      const response = await api.get(`/invoices/sales/${localInvoice.id}/`);
-      const updatedInvoice = response.data;
-      setLocalInvoice(updatedInvoice);
-      showToast('success', 'Rodymo pasirinkimas atnaujintas');
-      onInvoiceUpdate?.(updatedInvoice);
-      onSave(); // Trigger parent refresh
-    } catch (error: any) {
-      showToast('error', error.response?.data?.error || 'Klaida atnaujinant rodymo pasirinkimą');
     }
   };
   
@@ -1441,7 +1449,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                             textAlign: 'center',
                             boxShadow: '0 1px 3px rgba(0,123,255,0.2)'
                           }}>
-                            {selectedOrderTotal.toFixed(2)} €
+                            {formatMoney(selectedOrderTotal)}
                           </div>
                         </div>
                       )}
@@ -1546,9 +1554,9 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                                   background: '#ffffff'
                                 }}>
                                   {allOrdersToShow.map(order => {
-                                    const amountCandidate = order.suggested_amount_net ?? order.client_price_net ?? order.calculated_client_price_net;
-                                    const amountLabel = amountCandidate !== null && amountCandidate !== undefined && amountCandidate !== ''
-                                      ? `${parseFloat(String(amountCandidate)).toFixed(2)} €`
+                                    const amountValue = getOrderAmountForInvoice(order);
+                                    const amountLabel = amountValue > 0
+                                      ? formatMoney(amountValue)
                                       : 'Suma nenustatyta';
                                     const isSelected = selectedAdditionalOrderIds.includes(order.id);
                                     return (
@@ -1753,6 +1761,29 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                             ? 'Mokėjimo statusas keičiamas per PaymentService - visi pakeitimai matomi mokėjimų valdyme'
                             : 'Mokėjimo statusas bus nustatytas sukūrus sąskaitą'}
                         </div>
+                      </div>
+
+                      <div className="form-field">
+                        <label style={{ display: 'block', marginBottom: '4px', fontSize: '12px', fontWeight: '600', color: '#495057' }}>
+                          PVM tarifas
+                        </label>
+                        <select
+                          value={formData.vat_rate}
+                          onChange={(e) => setFormData({ ...formData, vat_rate: e.target.value })}
+                          style={{ 
+                            padding: '6px 10px', 
+                            borderRadius: '4px', 
+                            border: '1px solid #ced4da', 
+                            fontSize: '13px', 
+                            width: '100%',
+                            backgroundColor: '#ffffff'
+                          }}
+                        >
+                          <option value="0">Be PVM (0%)</option>
+                          <option value="21">Su PVM (21%)</option>
+                          <option value="9">9%</option>
+                          <option value="5">5%</option>
+                        </select>
                       </div>
 
                       <div className="form-field">
@@ -2103,7 +2134,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                                     <div>
                                       <div style={{ fontSize: '11px', color: '#666', marginBottom: '2px' }}>Suma</div>
                                       <div style={{ fontSize: '14px', fontWeight: '600', color: '#495057' }}>
-                                        {Number(payment.amount).toFixed(2)} €
+                                        {formatMoney(payment.amount)}
                                       </div>
                                     </div>
                                     <div>
@@ -2213,9 +2244,9 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                                   <div key={i}>{line}</div>
                                 ))}
                               </td>
-                              <td style={{ padding: '6px 8px', textAlign: 'right', border: '1px solid #dee2e6' }}>{Number(item.amount_net || 0).toFixed(2)} €</td>
-                              <td style={{ padding: '6px 8px', textAlign: 'right', border: '1px solid #dee2e6' }}>{Number(item.vat_amount || 0).toFixed(2)} €</td>
-                              <td style={{ padding: '6px 8px', textAlign: 'right', border: '1px solid #dee2e6', fontWeight: 'bold' }}>{Number(item.amount_total || 0).toFixed(2)} €</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'right', border: '1px solid #dee2e6' }}>{formatMoney(item.amount_net || 0)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'right', border: '1px solid #dee2e6' }}>{formatMoney(item.vat_amount || 0)}</td>
+                              <td style={{ padding: '6px 8px', textAlign: 'right', border: '1px solid #dee2e6', fontWeight: 'bold' }}>{formatMoney(item.amount_total || 0)}</td>
                             </tr>
                           ))}
                           {/* Bendros sumos eilutė */}
@@ -2228,7 +2259,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                                 const totalNet = localInvoice.invoice_items.reduce((sum: number, item: InvoiceItem) => {
                                   return sum + (Number(item.amount_net) || 0);
                                 }, 0);
-                                return totalNet.toFixed(2) + ' €';
+                                return formatMoney(totalNet);
                               })()}
                             </td>
                             <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #dee2e6' }}>
@@ -2236,7 +2267,7 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                                 const totalVat = localInvoice.invoice_items.reduce((sum: number, item: InvoiceItem) => {
                                   return sum + (Number(item.vat_amount) || 0);
                                 }, 0);
-                                return totalVat.toFixed(2) + ' €';
+                                return formatMoney(totalVat);
                               })()}
                             </td>
                             <td style={{ padding: '8px', textAlign: 'right', border: '1px solid #dee2e6' }}>
@@ -2244,121 +2275,29 @@ const SalesInvoiceModal_NEW: React.FC<SalesInvoiceModalProps> = ({
                                 const totalWithVat = localInvoice.invoice_items.reduce((sum: number, item: InvoiceItem) => {
                                   return sum + (Number(item.amount_total) || 0);
                                 }, 0);
-                                return totalWithVat.toFixed(2) + ' €';
+                                return formatMoney(totalWithVat);
                               })()}
                             </td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
-                    
-                    {/* Sąskaitos eilutės rodymo pasirinkimai */}
-                    <div style={{ marginTop: '12px', border: '1px solid #dee2e6', borderRadius: '6px', padding: '12px', backgroundColor: '#f8f9fa' }}>
-                      <label style={{ display: 'block', marginBottom: '8px', fontSize: '12px', fontWeight: '600', color: '#495057' }}>
-                        Sąskaitos eilutės rodymo pasirinkimai
+                    <div style={{ marginTop: '12px', padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px', border: '1px solid #dee2e6' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', fontSize: '12px' }}>
+                        <input
+                          type="checkbox"
+                          checked={formData.display_options?.show_loading_unloading_info === true}
+                          onChange={(e) => setFormData({
+                            ...formData,
+                            display_options: {
+                              ...formData.display_options,
+                              show_loading_unloading_info: e.target.checked,
+                            }
+                          })}
+                          style={{ marginRight: '8px', cursor: 'pointer' }}
+                        />
+                        Rodyti pakrovimo/iškrovimo informaciją HTML peržiūroje ir PDF
                       </label>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                        {/* Užsakymo tipas */}
-                        <div style={{ padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px', border: '1px solid #dee2e6' }}>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.display_options.show_order_type}
-                              onChange={(e) => setFormData({
-                                ...formData,
-                                display_options: {
-                                  ...formData.display_options,
-                                  show_order_type: e.target.checked,
-                                }
-                              })}
-                              style={{ marginRight: '8px', marginTop: '2px', cursor: 'pointer', width: '16px', height: '16px' }}
-                            />
-                            <div>
-                              <div style={{ fontWeight: '600', marginBottom: '2px', fontSize: '12px' }}>Užsakymo tipas</div>
-                              <div style={{ fontSize: '11px', color: '#6c757d' }}>Rodyti užsakymo tipą sąskaitos eilutėse</div>
-                            </div>
-                          </label>
-                        </div>
-                        
-                        {/* Krovinių informacija */}
-                        <div style={{ padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px', border: '1px solid #dee2e6' }}>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.display_options.show_cargo_info}
-                              onChange={(e) => {
-                                const value = e.target.checked;
-                                setFormData({
-                                  ...formData,
-                                  display_options: {
-                                    ...formData.display_options,
-                                    show_cargo_info: value,
-                                    show_cargo_weight: value,
-                                    show_cargo_ldm: value,
-                                    show_cargo_dimensions: value,
-                                    show_cargo_properties: value
-                                  }
-                                });
-                              }}
-                              style={{ marginRight: '8px', marginTop: '2px', cursor: 'pointer', width: '16px', height: '16px' }}
-                            />
-                            <div>
-                              <div style={{ fontWeight: '600', marginBottom: '2px', fontSize: '12px' }}>Krovinių informacija</div>
-                              <div style={{ fontSize: '11px', color: '#6c757d' }}>Svoris, matmenys, savybės</div>
-                            </div>
-                          </label>
-                        </div>
-                        
-                        {/* Vežėjai */}
-                        <div style={{ padding: '8px', backgroundColor: '#fff3cd', borderRadius: '4px', border: '1px solid #ffc107' }}>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.display_options.show_carriers}
-                              onChange={(e) => {
-                                const value = e.target.checked;
-                                setFormData({
-                                  ...formData,
-                                  display_options: {
-                                    ...formData.display_options,
-                                    show_carriers: value,
-                                    show_carrier_name: value,
-                                    show_carrier_route: value,
-                                    show_carrier_dates: value
-                                  }
-                                });
-                              }}
-                              style={{ marginRight: '8px', marginTop: '2px', cursor: 'pointer', width: '16px', height: '16px' }}
-                            />
-                            <div>
-                              <div style={{ fontWeight: '600', marginBottom: '2px', fontSize: '12px', color: '#856404' }}>Vežėjai</div>
-                              <div style={{ fontSize: '11px', color: '#856404' }}>⚠️ NESIŪLOMA rodyti klientams!</div>
-                            </div>
-                          </label>
-                        </div>
-                        
-                        {/* Papildomos išlaidos */}
-                        <div style={{ padding: '8px', backgroundColor: '#f8f9fa', borderRadius: '4px', border: '1px solid #dee2e6' }}>
-                          <label style={{ display: 'flex', alignItems: 'flex-start', cursor: 'pointer' }}>
-                            <input
-                              type="checkbox"
-                              checked={formData.display_options.show_other_costs}
-                              onChange={(e) => setFormData({
-                                ...formData,
-                                display_options: {
-                                  ...formData.display_options,
-                                  show_other_costs: e.target.checked,
-                                }
-                              })}
-                              style={{ marginRight: '8px', marginTop: '2px', cursor: 'pointer', width: '16px', height: '16px' }}
-                            />
-                            <div>
-                              <div style={{ fontWeight: '600', marginBottom: '2px', fontSize: '12px' }}>Papildomos išlaidos</div>
-                              <div style={{ fontSize: '11px', color: '#6c757d' }}>Muitinė, draudimas ir kt.</div>
-                            </div>
-                          </label>
-                        </div>
-                      </div>
                     </div>
                   </div>
                 </div>

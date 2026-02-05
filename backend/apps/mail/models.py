@@ -126,6 +126,12 @@ class MailMessage(models.Model):
         help_text=_('True jei laiškas buvo priskirtas prie užsakymo rankiniu būdu (apsauga nuo OCR pakeitimų)'),
         db_index=True,
     )
+    matches_computed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_('Sutapimai apskaičiuoti'),
+        help_text=_('Kada paskutinį kartą buvo paleista sutapimų logika – sąrašuose naudojame tik DB, nebekuriame teksto.'),
+    )
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_('Sukurta'))
     updated_at = models.DateTimeField(auto_now=True, verbose_name=_('Atnaujinta'))

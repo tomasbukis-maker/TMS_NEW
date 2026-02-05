@@ -605,7 +605,8 @@ const CarrierModal: React.FC<CarrierModalProps> = ({
       const response = await api.get('/partners/partners/', {
         params: {
           search: query,
-          page_size: 10
+          page_size: 10,
+          include_code_errors: 1
         }
       });
       const partners = response.data.results || response.data || [];

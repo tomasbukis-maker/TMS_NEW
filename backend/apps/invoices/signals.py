@@ -1,14 +1,89 @@
 """
 Django signal'ai sąskaitų moduliui.
 Automatiškai atnaujina client_invoice_issued lauką užsakymuose.
+Sinchronizuoja PurchaseInvoice payment_status su OrderCarrier.
 """
 import logging
 from django.db.models.signals import post_save, post_delete, pre_delete
+from django.db import models
 from django.dispatch import receiver
-from .models import SalesInvoice, SalesInvoiceOrder
-from apps.orders.models import Order
+from .models import SalesInvoice, SalesInvoiceOrder, PurchaseInvoice
+from apps.orders.models import Order, OrderCarrier
 
 logger = logging.getLogger(__name__)
+
+
+def _sync_order_partner_carrier_status(order_id, partner_id):
+    """
+    Apskaičiuoti apmokėjimo būseną iš visų PurchaseInvoice šiam (order_id, partner_id)
+    ir atnaujinti OrderCarrier. Naudojama po save ir po delete.
+    """
+    all_invoices = PurchaseInvoice.objects.filter(
+        partner_id=partner_id
+    ).filter(
+        models.Q(related_order_id=order_id) | models.Q(related_orders__id=order_id)
+    ).distinct()
+    total = all_invoices.count()
+    if total == 0:
+        OrderCarrier.objects.filter(
+            order_id=order_id,
+            partner_id=partner_id
+        ).update(payment_status='not_paid', payment_date=None)
+        return
+    paid_count = all_invoices.filter(payment_status='paid').count()
+    partially_count = all_invoices.filter(payment_status='partially_paid').count()
+    if paid_count == total:
+        carrier_status = 'paid'
+        last_paid = (
+            all_invoices.filter(payment_status='paid')
+            .order_by('-payment_date')
+            .values_list('payment_date', flat=True)
+            .first()
+        )
+        carrier_payment_date = last_paid
+    elif paid_count > 0 or partially_count > 0:
+        carrier_status = 'partially_paid'
+        last_paid = (
+            all_invoices.filter(payment_status='paid')
+            .order_by('-payment_date')
+            .values_list('payment_date', flat=True)
+            .first()
+        )
+        carrier_payment_date = last_paid
+    else:
+        carrier_status = 'not_paid'
+        carrier_payment_date = None
+    OrderCarrier.objects.filter(
+        order_id=order_id,
+        partner_id=partner_id
+    ).update(
+        payment_status=carrier_status,
+        payment_date=carrier_payment_date
+    )
+
+
+def _sync_purchase_invoice_to_carriers(purchase_invoice):
+    """
+    Sinchronizuoti pirkimo sąskaitos payment_status su OrderCarrier.
+    Jei (order, partner) turi kelias sąskaitas – naudoti suvestinę.
+    """
+    if not purchase_invoice.partner_id:
+        return
+    orders_to_check = []
+    if purchase_invoice.related_order_id:
+        orders_to_check.append(purchase_invoice.related_order_id)
+    if hasattr(purchase_invoice, 'related_orders'):
+        orders_to_check.extend(
+            purchase_invoice.related_orders.values_list('id', flat=True)
+        )
+    for order_id in set(orders_to_check):
+        try:
+            _sync_order_partner_carrier_status(order_id, purchase_invoice.partner_id)
+        except Exception as e:
+            logger.warning(
+                "Klaida sinchronizuojant PurchaseInvoice -> OrderCarrier order_id=%s: %s",
+                order_id, e, exc_info=True
+            )
 
 
 def update_order_invoice_issued_flag(order):
@@ -139,3 +214,52 @@ def sales_invoice_order_deleted(sender, instance, **kwargs):
                 logger.warning(f"Klaida atnaujinant užsakymą {order_id}: {e}")
     except Exception as e:
         logger.error(f"Klaida signal'e sales_invoice_order_deleted: {e}", exc_info=True)
+
+
+# Laikinas saugojimas (order_ids, partner_id) prieš trinant PurchaseInvoice
+_purchase_invoice_carrier_pairs_cache = {}
+
+
+@receiver(pre_delete, sender=PurchaseInvoice)
+def purchase_invoice_pre_delete(sender, instance, **kwargs):
+    """Prieš trinant PurchaseInvoice, išsaugoti (order_ids, partner_id) sinchronizacijai."""
+    try:
+        if not instance.partner_id or not instance.id:
+            return
+        order_ids = set()
+        if instance.related_order_id:
+            order_ids.add(instance.related_order_id)
+        if hasattr(instance, 'related_orders'):
+            order_ids.update(instance.related_orders.values_list('id', flat=True))
+        _purchase_invoice_carrier_pairs_cache[instance.id] = (list(order_ids), instance.partner_id)
+    except Exception as e:
+        logger.warning("Klaida purchase_invoice_pre_delete: %s", e)
+
+
+@receiver(post_delete, sender=PurchaseInvoice)
+def purchase_invoice_deleted(sender, instance, **kwargs):
+    """Po PurchaseInvoice ištrynimo atnaujinti OrderCarrier pagal likusias sąskaitas."""
+    try:
+        pair = _purchase_invoice_carrier_pairs_cache.pop(instance.id if instance.id else None, None)
+        if not pair:
+            return
+        order_ids, partner_id = pair
+        for order_id in order_ids:
+            try:
+                _sync_order_partner_carrier_status(order_id, partner_id)
+            except Exception as e:
+                logger.warning("Klaida sinchronizuojant po PurchaseInvoice delete order_id=%s: %s", order_id, e)
+    except Exception as e:
+        logger.error("Klaida signal'e purchase_invoice_deleted: %s", e, exc_info=True)
+
+
+@receiver(post_save, sender=PurchaseInvoice)
+def purchase_invoice_saved(sender, instance, created, **kwargs):
+    """
+    Kai PurchaseInvoice yra sukurtas arba atnaujintas, sinchronizuoti payment_status
+    su OrderCarrier, kad užsakymų sąraše būtų rodoma teisinga gautų sąskaitų apmokėjimo būsena.
+    """
+    try:
+        _sync_purchase_invoice_to_carriers(instance)
+    except Exception as e:
+        logger.error("Klaida signal'e purchase_invoice_saved: %s", e, exc_info=True)

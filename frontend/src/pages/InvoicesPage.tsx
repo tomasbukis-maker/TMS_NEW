@@ -6,12 +6,10 @@ import { api } from '../services/api';
 import OrderEditModal_NEW from '../components/orders/OrderEditModal_NEW';
 import SalesInvoiceModal_NEW from '../components/invoices/SalesInvoiceModal_NEW';
 import PurchaseInvoiceModal_NEW from '../components/invoices/PurchaseInvoiceModal_NEW';
-// TODO: Seni modalai - bus ištrinti
-// import PurchaseInvoiceEditModal from '../components/invoices/PurchaseInvoiceEditModal_OLD';
-// import PurchaseInvoiceDetailsModal from '../components/invoices/PurchaseInvoiceDetailsModal_OLD';
 import { SkeletonTable } from '../components/common/SkeletonLoader';
 import HTMLPreviewModal, { HTMLPreview } from '../components/common/HTMLPreviewModal';
 import { useUISettings } from '../hooks/useUISettings';
+import { formatMoney } from '../utils/formatMoney';
 import './InvoicesPage.css';
 
 // Helper funkcija datos formatavimui
@@ -239,7 +237,7 @@ const InvoiceAmountTooltip: React.FC<{
               {otherCosts.map((cost, idx) => (
                 <div key={idx} style={{ marginBottom: idx < otherCosts.length - 1 ? '6px' : '0', lineHeight: '1.4' }}>
                   <div style={{ fontWeight: 'bold', marginBottom: '2px' }}>{cost.description || 'Nenurodyta'}</div>
-                  <div>{parseFloat(String(cost.amount || 0)).toFixed(2)} EUR</div>
+                  <div>{formatMoney(cost.amount ?? 0)}</div>
                 </div>
               ))}
             </>
@@ -386,8 +384,8 @@ const PurchaseInvoiceAmountTooltip: React.FC<{
             Sąskaitos informacija:
           </div>
           <div style={{ marginBottom: '6px', lineHeight: '1.5' }}>
-            <div><strong>Suma be PVM:</strong> {parseFloat(invoice.amount_net || '0').toFixed(2)} €</div>
-            <div><strong>Suma su PVM:</strong> {parseFloat(invoice.amount_total || invoice.amount_net || '0').toFixed(2)} €</div>
+            <div><strong>Suma be PVM:</strong> {formatMoney(invoice.amount_net || '0')}</div>
+            <div><strong>Suma su PVM:</strong> {formatMoney(invoice.amount_total || invoice.amount_net || '0')}</div>
             <div><strong>Gavimo data:</strong> {formatDate(invoice.received_date)}</div>
             <div><strong>Terminas apmokėti:</strong> {getDaysUntilDue()}</div>
           </div>
@@ -404,8 +402,8 @@ interface Partner {
 }
 
 interface OtherCost {
-  description: string;
-  amount: number;
+  description?: string;
+  amount?: number | string;
 }
 
 interface Order {
@@ -478,6 +476,7 @@ interface SalesInvoice {
     show_prices?: boolean;
     show_my_price?: boolean;
     show_other_costs?: boolean;
+    show_loading_unloading_info?: boolean;
   };
   created_at?: string;
   updated_at?: string;
@@ -605,6 +604,13 @@ const InvoicesPage: React.FC = () => {
   const [showSalesModal, setShowSalesModal] = useState(false);
   const [currentSalesInvoice, setCurrentSalesInvoice] = useState<SalesInvoice | null>(null);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  /** Pradiniai duomenys, kai atidaromas „pridėti pirkimo sąskaitą iš vežėjo“ (iš URL) */
+  const [createPurchaseInitialParams, setCreatePurchaseInitialParams] = useState<{
+    orderCarrierId?: string;
+    orderId?: string;
+    partnerId?: string;
+    amountNet?: string;
+  } | null>(null);
   const [currentPurchaseInvoice, setCurrentPurchaseInvoice] = useState<PurchaseInvoice | null>(null);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -676,6 +682,7 @@ const InvoicesPage: React.FC = () => {
       show_prices?: boolean;
       show_my_price?: boolean;
       show_other_costs?: boolean;
+      show_loading_unloading_info?: boolean;
     };
   } | null>(null);
 
@@ -748,7 +755,7 @@ const InvoicesPage: React.FC = () => {
       if (salesFilters.due_date_to) params.due_date__lte = salesFilters.due_date_to;
       if (salesFilters.search) params.search = salesFilters.search;
       
-      params.ordering = '-issue_date,-created_at';
+      params.ordering = '-invoice_number';  // didžiausias numeris viršuje
       const response = await api.get('/invoices/sales/', { params });
       
       if (response.data.results && Array.isArray(response.data.results)) {
@@ -840,7 +847,7 @@ const InvoicesPage: React.FC = () => {
 
     try {
       const response = await api.get('/partners/partners/', {
-        params: { search: query, is_client: true, page_size: 20 }
+        params: { search: query, is_client: true, page_size: 20, include_code_errors: 1 }
       });
       const results = response.data.results || response.data;
       setPartners(results.filter((p: Partner) => p.name.toLowerCase().includes(query.toLowerCase())));
@@ -857,7 +864,7 @@ const InvoicesPage: React.FC = () => {
 
     try {
       const response = await api.get('/partners/partners/', {
-        params: { search: query, is_supplier: true, page_size: 20 }
+        params: { search: query, is_supplier: true, page_size: 20, include_code_errors: 1 }
       });
       const results = response.data.results || response.data;
       setSuppliers(results.filter((p: Partner) => p.name.toLowerCase().includes(query.toLowerCase())));
@@ -1111,23 +1118,26 @@ const InvoicesPage: React.FC = () => {
       return;
     }
     
-    // Patikrinti ar reikia atidaryti pirkimo sąskaitos formą iš užsakymo
+    // Patikrinti ar reikia atidaryti pirkimo sąskaitos formą iš užsakymo / vežėjo
     if (params.get('create_purchase') === 'true') {
-      const orderCarrierId = params.get('order_carrier_id');
-      const orderId = params.get('order_id');
-      const partnerId = params.get('partner_id');
-      const amountNet = params.get('amount_net');
-      
-      if (orderCarrierId && partnerId) {
+      const orderCarrierId = params.get('order_carrier_id') ?? undefined;
+      const orderId = params.get('order_id') ?? undefined;
+      const partnerId = params.get('partner_id') ?? undefined;
+      const amountNet = params.get('amount_net') ?? undefined;
+
+      if (partnerId) {
         setActiveTab('purchase');
-        // Atidaryti modalą su nauju modalu (create mode)
-        // Modalas pats užkraus duomenis pagal initial props
-        setCurrentPurchaseInvoice(null); // Create mode
+        setCreatePurchaseInitialParams({
+          orderCarrierId,
+          orderId,
+          partnerId,
+          amountNet,
+        });
+        setCurrentPurchaseInvoice(null);
         setShowPurchaseModal(true);
-        
-        // Išvalyti URL po trumpo delay, kad modalas turėtų laiko užkrauti duomenis
+
         setTimeout(() => {
-        navigate('/invoices', { replace: true });
+          navigate('/invoices', { replace: true });
         }, 200);
       }
     }
@@ -1874,10 +1884,13 @@ const InvoicesPage: React.FC = () => {
                         <td>
                           <InvoiceAmountTooltip invoice={invoice}>
                           {(() => {
-                            const vatRate = parseFloat(invoice.vat_rate || '0');
-                            const amountTotal = invoice.amount_total ? parseFloat(invoice.amount_total) : parseFloat(invoice.amount_net);
-                            const pvmLabel = vatRate > 0 ? t('invoices.table.with_vat') : t('invoices.table.without_vat');
-                            return `${amountTotal.toFixed(2)} € ${pvmLabel}`;
+                            const vatRate = Number(invoice.vat_rate);
+                            const isWithVat = !Number.isNaN(vatRate) && vatRate > 0;
+                            const amount = isWithVat
+                              ? (invoice.amount_total ? parseFloat(invoice.amount_total) : parseFloat(invoice.amount_net || '0'))
+                              : (invoice.amount_net ? parseFloat(invoice.amount_net) : parseFloat(invoice.amount_total || '0'));
+                            const pvmLabel = isWithVat ? t('invoices.table.with_vat') : t('invoices.table.without_vat');
+                            return `${formatMoney(Number.isNaN(amount) ? 0 : amount)} ${pvmLabel}`;
                           })()}
                           </InvoiceAmountTooltip>
                         </td>
@@ -2625,7 +2638,7 @@ const InvoicesPage: React.FC = () => {
                           <PurchaseInvoiceAmountTooltip invoice={invoice}>
                           {(() => {
                             const amountNet = parseFloat(invoice.amount_net || '0');
-                            return `${amountNet.toFixed(2)} € (be PVM)`;
+                            return `${formatMoney(amountNet)} (be PVM)`;
                           })()}
                           </PurchaseInvoiceAmountTooltip>
                         </td>
@@ -2988,9 +3001,14 @@ const InvoicesPage: React.FC = () => {
         <PurchaseInvoiceModal_NEW
           invoice={currentPurchaseInvoice}
           isOpen={showPurchaseModal}
+          initialPartnerId={createPurchaseInitialParams?.partnerId}
+          initialOrderId={createPurchaseInitialParams?.orderId}
+          initialAmountNet={createPurchaseInitialParams?.amountNet}
+          orderCarrierId={createPurchaseInitialParams?.orderCarrierId}
           onClose={() => {
             setShowPurchaseModal(false);
             setCurrentPurchaseInvoice(null);
+            setCreatePurchaseInitialParams(null);
           }}
           onSave={() => {
             fetchPurchaseInvoices();
@@ -3009,11 +3027,6 @@ const InvoicesPage: React.FC = () => {
           }}
           showToast={showToast}
         />
-
-        {/* TODO: Seni modalai - pašalinti */}
-        {/* <PurchaseInvoiceEditModal ... /> */}
-        {/* <PurchaseInvoiceDetailsModal ... /> */}
-
 
         {/* Order Details Modal - Naikinimui */}
         {/*

@@ -14,6 +14,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
+from django_filters import rest_framework as df_filters
 
 from .models import MailAttachment, MailMessage, MailMessageTag, MailSender, MailSyncState, MailTag, EmailLog
 from apps.partners.models import Contact
@@ -33,6 +34,7 @@ from .services import sync_imap
 from .bounce_handler import process_bounce_emails
 from apps.orders.models import Order, OrderCarrier
 from apps.partners.models import Contact
+from apps.settings.format_utils import format_money
 from email.utils import getaddresses
 from .utils import extract_email_from_sender
 
@@ -186,36 +188,68 @@ class MailMessageViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    @action(detail=False, methods=['get'], url_path='senders-from-messages')
+    def senders_from_messages(self, request):
+        """
+        Grąžina unikalius siuntėjus iš visų sinchronizuotų laiškų (el. paštas + siūlomas vardas iš From antraštės).
+        Naudojama „Appsas“ skiltyje – pridėti siuntėjus kaip klientų kontaktus.
+        Įtraukiami visi laiškai su sender_email, ne tik new/linked – kad būtų daugiau siuntėjų priskyrimui.
+        """
+        from django.db.models import Max
+        # Gauti unikalius sender_email iš visų laiškų (ne tik new/linked), su paskutiniu 'sender' kiekvienam
+        sub = MailMessage.objects.filter(
+            sender_email__isnull=False
+        ).exclude(
+            sender_email=''
+        ).values('sender_email').annotate(
+            max_date=Max('date')
+        )
+        # Neįtraukti: reklaminiai (is_advertising=True) ir jau priskirti prie partnerių
+        advertising_emails = list(Contact.objects.filter(is_advertising=True).values_list('email', flat=True))
+        if advertising_emails:
+            sub = sub.exclude(sender_email__in=advertising_emails)
+        assigned_emails = {(e or '').strip().lower() for e in Contact.objects.values_list('email', flat=True) if e}
+        # Paimti vieną laišką per sender_email (su sender lauku)
+        seen_emails = set()
+        result = []
+        for row in sub:
+            email_key = (row['sender_email'] or '').strip().lower()
+            if not email_key or email_key in seen_emails or email_key in assigned_emails:
+                continue
+            seen_emails.add(email_key)
+            msg = MailMessage.objects.filter(
+                sender_email__iexact=row['sender_email'],
+                date=row['max_date']
+            ).values('sender_email', 'sender').first()
+            if not msg:
+                continue
+            raw_sender = (msg.get('sender') or '').strip()
+            suggested_name = ''
+            if raw_sender:
+                try:
+                    addresses = getaddresses([raw_sender])
+                    if addresses and addresses[0][0]:
+                        suggested_name = (addresses[0][0] or '').strip()
+                except Exception:
+                    pass
+            result.append({
+                'email': msg['sender_email'],
+                'suggested_name': suggested_name,
+            })
+        return Response(result)
+
     @action(detail=False, methods=['get'])
     def linked(self, request):
-        """Susieti laiškai: realiai susieti + visi laiškai kurie turi užsakymo/ekspedicijos numerį tekste (įskaitant sistemos laiškus)"""
+        """Susieti laiškai – tik tie, kurių sutapimai jau įrašyti į DB (matched_* arba related_order_id).
+        Nauji laiškai sutapimus gauna sync metu per update_message_matches; sąraše nebepildome teksto skenavimo."""
         self.request = request
 
-        # Naudojame tą patį algoritmą kaip by-order endpoint'as, bet BE filtro prieš sistemos laiškus
-        # Gauname užsakymo numerį iš query params (bet čia jo nėra, tai ieškome visų)
-        from apps.orders.models import Order, OrderCarrier
-
-        # Gauname visus numerius
-        all_order_numbers = set(str(num).strip().upper() for num in Order.objects.exclude(order_number__isnull=True).exclude(order_number='').values_list('order_number', flat=True) if num)
-        all_exp_numbers = set(str(num).strip().upper() for num in OrderCarrier.objects.exclude(expedition_number__isnull=True).exclude(expedition_number='').values_list('expedition_number', flat=True) if num)
-
-        # Kuriam sąlygą kuri randa laiškus su bet kuriuo numeriu
-        number_condition = Q()
-        for number in all_order_numbers | all_exp_numbers:
-            number_condition |= (
-                Q(subject__icontains=number) |
-                Q(snippet__icontains=number) |
-                Q(body_plain__icontains=number)
-            )
-
-        # Sujungiame: realiai susieti + turi numerį tekste
         queryset = self.get_queryset().filter(
             Q(matched_orders__isnull=False) |
             Q(matched_expeditions__isnull=False) |
             Q(matched_sales_invoices__isnull=False) |
             Q(matched_purchase_invoices__isnull=False) |
-            Q(related_order_id__isnull=False) |
-            number_condition
+            Q(related_order_id__isnull=False)
         ).distinct()
 
         queryset = self._apply_filters(queryset, request)
@@ -779,7 +813,7 @@ class MailAttachmentViewSet(viewsets.ReadOnlyModelViewSet):
                         'id': found_invoice.id,
                         'received_invoice_number': found_invoice.received_invoice_number,
                         'partner_name': found_invoice.partner.name if found_invoice.partner else None,
-                        'amount_net': str(found_invoice.amount_net),
+                        'amount_net': format_money(found_invoice.amount_net),
                         'issue_date': found_invoice.issue_date.isoformat() if found_invoice.issue_date else None,
                     }
                 })
@@ -798,7 +832,7 @@ class MailAttachmentViewSet(viewsets.ReadOnlyModelViewSet):
                         'id': filename_match.id,
                         'received_invoice_number': filename_match.received_invoice_number,
                         'partner_name': filename_match.partner.name if filename_match.partner else None,
-                        'amount_net': str(filename_match.amount_net),
+                        'amount_net': format_money(filename_match.amount_net),
                         'issue_date': filename_match.issue_date.isoformat() if filename_match.issue_date else None,
                     }
                 })
@@ -839,13 +873,37 @@ class MailSyncStateViewSet(viewsets.ModelViewSet):
         return qs
 
 
+class EmailLogFilter(df_filters.FilterSet):
+    """Filtruoja EmailLog. related_order_id: taip pat įtraukia laiškus, susietus per šio užsakymo sąskaitas."""
+    related_order_id = df_filters.NumberFilter(method='filter_related_order')
+    email_type = df_filters.CharFilter(lookup_expr='exact')
+    status = df_filters.CharFilter(lookup_expr='exact')
+    related_invoice_id = df_filters.NumberFilter(lookup_expr='exact')
+    related_expedition_id = df_filters.NumberFilter(lookup_expr='exact')
+    related_partner_id = df_filters.NumberFilter(lookup_expr='exact')
+
+    def filter_related_order(self, queryset, name, value):
+        if value is None:
+            return queryset
+        from apps.invoices.models import SalesInvoice
+        invoice_ids = set(SalesInvoice.objects.filter(related_order_id=value).values_list('id', flat=True))
+        invoice_ids |= set(SalesInvoice.objects.filter(related_orders=value).values_list('id', flat=True))
+        return queryset.filter(
+            Q(related_order_id=value) | (Q(related_invoice_id__in=invoice_ids) if invoice_ids else Q(pk__in=[]))
+        )
+
+    class Meta:
+        model = EmailLog
+        fields = ['email_type', 'status', 'related_order_id', 'related_invoice_id', 'related_expedition_id', 'related_partner_id']
+
+
 class EmailLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = EmailLog.objects.select_related('sent_by').all()
     serializer_class = EmailLogSerializer
     permission_classes = [IsAuthenticated]
     pagination_class = EmailLogPageNumberPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['email_type', 'status', 'related_order_id', 'related_invoice_id', 'related_expedition_id', 'related_partner_id']
+    filterset_class = EmailLogFilter
     search_fields = ['subject', 'recipient_email', 'recipient_name']
     ordering_fields = ['created_at', 'sent_at']
     ordering = ['-created_at']

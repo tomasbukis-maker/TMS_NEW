@@ -6,6 +6,7 @@ from datetime import timedelta
 from django.core.mail import EmailMessage, get_connection
 from apps.mail.email_logger import send_email_message_with_logging
 from apps.settings.email_utils import render_email_template
+from apps.settings.format_utils import format_money
 from .models import SalesInvoice, PurchaseInvoice, InvoiceReminder
 
 
@@ -147,19 +148,35 @@ def _should_send_reminder(
     return True, None
 
 
-def _get_recipient_email_and_name(invoice: SalesInvoice, notification_settings, is_manual: bool = False):
+def _get_recipient_email_and_name(invoice: SalesInvoice, notification_settings, is_manual: bool = False, contact_id=None):
     """
     Gauna gavėjo el. pašto adresą ir vardą.
+    
+    contact_id: jei nurodytas, naudoti šio kontakto (partnerio) el. paštą ir vardą.
     
     Returns:
         (email: str | None, name: str)
     """
+    from apps.partners.models import Contact
+
     partner = invoice.partner
     recipient_name = partner.name or 'Klientas'
     recipient_email = None
-    
-    # Patikrinti, ar partneris turi kontaktą su email
-    if partner.contact_person and partner.contact_person.email:
+
+    # Jei nurodytas contact_id, naudoti to kontakto el. paštą (tik jei priklauso šiam partneriui)
+    if contact_id:
+        try:
+            contact = Contact.objects.filter(pk=contact_id, partner=partner).first()
+            if contact and contact.email:
+                contact_email = str(contact.email).strip()
+                if contact_email and '@' in contact_email:
+                    recipient_email = contact_email
+                    recipient_name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or partner.name or 'Klientas'
+        except (Contact.DoesNotExist, ValueError):
+            pass
+
+    # Jei dar nėra gavėjo, patikrinti partnerio contact_person
+    if not recipient_email and partner.contact_person and partner.contact_person.email:
         contact_email = str(partner.contact_person.email).strip()
         if contact_email and '@' in contact_email:
             recipient_email = contact_email
@@ -202,7 +219,9 @@ def send_debtor_reminder_email(
     invoice: SalesInvoice,
     template_data: dict = None,
     sent_by=None,
-    reminder_type: str = None
+    reminder_type: str = None,
+    contact_id=None,
+    pdf_bytes=None
 ):
     """
     Siunčia priminimo email klientui.
@@ -213,6 +232,8 @@ def send_debtor_reminder_email(
         sent_by: User objektas, kuris siuntė (optional)
         reminder_type: Priminimo tipas ('due_soon', 'unpaid', 'overdue'). 
                        Jei None, nustatoma automatiškai pagal sąskaitos statusą ir datą.
+        contact_id: Partnerio kontakto ID, į kurį siųsti (optional). Jei nurodytas, naudojamas šio kontakto el. paštas.
+        pdf_bytes: Sąskaitos PDF baitai – jei nurodyta, prisegami prie laiško (optional).
     
     Returns:
         dict su 'success' (bool), 'error' arba 'message' (str), 'email_log_id' (int)
@@ -245,11 +266,12 @@ def send_debtor_reminder_email(
             'error': error_message
         }
     
-    # Gauti gavėjo el. pašto adresą ir vardą
+    # Gauti gavėjo el. pašto adresą ir vardą (galima nurodyti contact_id)
     recipient_email, recipient_name = _get_recipient_email_and_name(
         invoice,
         notification_settings,
-        is_manual=is_manual
+        is_manual=is_manual,
+        contact_id=contact_id
     )
     
     # Patikrinti, ar el. pašto adresas yra validus
@@ -335,13 +357,13 @@ def send_debtor_reminder_email(
             lines.append(f"{inv['invoice_number']} - {inv['status']}")
         other_invoices_text = '\n'.join(lines)
     
-    # Paruošti kintamuosius template'ui
+    # Paruošti kintamuosius template'ui (sumos pagal InvoiceSettings – dešimtainiai, skyriklis, valiuta)
     context = {
         'invoice_number': invoice.invoice_number or f'Sąskaita #{invoice.id}',
         'partner_name': recipient_name,
-        'amount': str(invoice.amount_total or invoice.amount_net or '0.00'),
-        'amount_net': str(invoice.amount_net or '0.00') if invoice.amount_net else '0.00',
-        'amount_total': str(invoice.amount_total or '0.00') if invoice.amount_total else '0.00',
+        'amount': format_money(invoice.amount_total or invoice.amount_net or 0),
+        'amount_net': format_money(invoice.amount_net or 0),
+        'amount_total': format_money(invoice.amount_total or 0),
         'vat_rate': str(invoice.vat_rate) if invoice.vat_rate else '0',
         'issue_date': invoice.issue_date.strftime('%Y-%m-%d') if invoice.issue_date else '',
         'due_date': invoice.due_date.strftime('%Y-%m-%d') if invoice.due_date else '',
@@ -350,15 +372,28 @@ def send_debtor_reminder_email(
         'other_unpaid_invoices': other_invoices_text,
     }
     
-    # Pridėti užsakymo informaciją, jei yra
-    if invoice.related_order:
-        context['order_number'] = invoice.related_order.order_number or f'Užsakymas #{invoice.related_order.id}'
-        if invoice.related_order.manager:
-            context['manager_name'] = invoice.related_order.manager.get_full_name() or invoice.related_order.manager.username
+    # Pridėti užsakymo informaciją, jei yra (order_number, client_order_number, maršrutas, datos, manager_name)
+    order = getattr(invoice, 'related_order', None) or (invoice.related_orders.first() if getattr(invoice, 'related_orders', None) and invoice.related_orders.exists() else None)
+    if order:
+        context['order_number'] = order.order_number or f'Užsakymas #{order.id}'
+        context['client_order_number'] = getattr(order, 'client_order_number', None) or ''
+        context['route_from'] = order.route_from or ''
+        context['route_to'] = order.route_to or ''
+        context['loading_date'] = order.loading_date.strftime('%Y-%m-%d') if order.loading_date else ''
+        context['unloading_date'] = order.unloading_date.strftime('%Y-%m-%d') if order.unloading_date else ''
+        context['order_date'] = order.order_date.strftime('%Y-%m-%d') if order.order_date else ''
+        if order.manager:
+            context['manager_name'] = order.manager.get_full_name() or order.manager.username
         else:
             context['manager_name'] = ''
     else:
         context['order_number'] = ''
+        context['client_order_number'] = ''
+        context['route_from'] = ''
+        context['route_to'] = ''
+        context['loading_date'] = ''
+        context['unloading_date'] = ''
+        context['order_date'] = ''
         context['manager_name'] = ''
     
     # Pridėti papildomus duomenis iš template_data, jei yra
@@ -427,11 +462,16 @@ def send_debtor_reminder_email(
             to=[recipient_email],
             connection=connection,
         )
+        if pdf_bytes and isinstance(pdf_bytes, bytes) and pdf_bytes.startswith(b'%PDF'):
+            filename = f"saskaita_{invoice.invoice_number or invoice.id}.pdf"
+            email_msg.attach(filename, pdf_bytes, 'application/pdf')
         
+        order_id = getattr(invoice, 'related_order_id', None) or (invoice.related_orders.first().id if invoice.related_orders.exists() else None)
         result = send_email_message_with_logging(
             email_message=email_msg,
-        email_type='reminder',
-        related_invoice_id=invoice.id,
+            email_type='reminder',
+            related_order_id=order_id,
+            related_invoice_id=invoice.id,
             related_partner_id=invoice.partner.id if invoice.partner else None,
             sent_by=sent_by,
             metadata={'recipient_name': recipient_name}

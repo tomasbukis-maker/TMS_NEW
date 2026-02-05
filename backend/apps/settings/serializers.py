@@ -150,7 +150,9 @@ class InvoiceSettingsSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'default_vat_rate', 'default_payment_term_days',
             'invoice_prefix_sales', 'invoice_number_width',
-            'invoice_footer_text', 'auto_numbering', 'default_display_options', 'notes',
+            'invoice_footer_text', 'auto_numbering',
+            'currency_code', 'currency_symbol', 'decimal_places', 'decimal_separator',
+            'default_display_options', 'notes',
             'last_invoice_number', 'next_invoice_number', 'next_invoice_number_edit',
             'created_at', 'updated_at'
         ]

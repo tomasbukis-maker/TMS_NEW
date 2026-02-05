@@ -33,6 +33,8 @@ def dashboard_statistics(request):
         
         # Datų filtras
         period_type = request.GET.get('period_type', 'month')  # 'all' arba 'month'
+        date_from_param = request.GET.get('date_from')  # YYYY-MM-DD – tikslius rėžiai (šiandien, savaitė, custom)
+        date_to_param = request.GET.get('date_to')
         year_param = request.GET.get('year')
         month_param = request.GET.get('month')
         filter_by = request.GET.get('filter_by', '')  # Pagal ką filtruoti: issue_date, due_date, payment_date, created_at, order_date, loading_date, unloading_date, first_order, first_invoice
@@ -41,6 +43,17 @@ def dashboard_statistics(request):
             # Nuo pradžių
             date_from = None
             date_to = None
+        elif date_from_param and date_to_param:
+            # Tikslius rėžiai iš frontendo (šiandien, savaitė, custom)
+            try:
+                from datetime import date as date_type
+                date_from = date_type.fromisoformat(date_from_param)
+                date_to = date_type.fromisoformat(date_to_param)
+                if date_from > date_to:
+                    date_from, date_to = date_to, date_from
+            except (ValueError, TypeError):
+                date_from = today.replace(day=1)
+                date_to = (today.replace(month=today.month + 1, day=1) - timedelta(days=1)) if today.month < 12 else (today.replace(year=today.year + 1, month=1, day=1) - timedelta(days=1))
         else:
             # Mėnesio pasirinkimas
             if year_param:
@@ -125,6 +138,25 @@ def dashboard_statistics(request):
             total=Sum('amount_total')
         )['total'] or Decimal('0.00')
         
+        # Dalinai apmokėtos išrašytos sąskaitos – VISADA visos (kaip Mokėjimų valdyme, be jokių filtrų)
+        partially_paid_sales = SalesInvoice.objects.filter(
+            payment_status=SalesInvoice.PaymentStatus.PARTIALLY_PAID
+        ).select_related('partner').order_by('issue_date', 'created_at')
+        partially_paid_sales_count = partially_paid_sales.count()
+        partially_paid_sales_total = partially_paid_sales.aggregate(
+            total=Sum('amount_total')
+        )['total'] or Decimal('0.00')
+        oldest_partially_paid_sales_list = [
+            {
+                'invoice_number': inv.invoice_number,
+                'partner_name': inv.partner.name,
+                'amount_total': str(inv.amount_total),
+                'issue_date': inv.issue_date.isoformat() if inv.issue_date else None,
+                'due_date': inv.due_date.isoformat() if inv.due_date else None,
+            }
+            for inv in partially_paid_sales[:3]
+        ]
+        
         # 3 seniausios neapmokėtos išrašytos sąskaitos
         oldest_unpaid_sales = unpaid_sales[:3]
         oldest_unpaid_sales_list = [
@@ -192,6 +224,25 @@ def dashboard_statistics(request):
             total=Sum('amount_total')
         )['total'] or Decimal('0.00')
         
+        # Dalinai apmokėtos gautos sąskaitos – VISADA visos (kaip Mokėjimų valdyme, be jokių filtrų)
+        partially_paid_purchase = PurchaseInvoice.objects.filter(
+            payment_status=PurchaseInvoice.PaymentStatus.PARTIALLY_PAID
+        ).select_related('partner').order_by('issue_date', 'created_at')
+        partially_paid_purchase_count = partially_paid_purchase.count()
+        partially_paid_purchase_total = partially_paid_purchase.aggregate(
+            total=Sum('amount_total')
+        )['total'] or Decimal('0.00')
+        oldest_partially_paid_purchase_list = [
+            {
+                'invoice_number': inv.received_invoice_number or inv.invoice_number or f'INV{inv.id}',
+                'partner_name': inv.partner.name,
+                'amount_total': str(inv.amount_total),
+                'issue_date': inv.issue_date.isoformat() if inv.issue_date else None,
+                'due_date': inv.due_date.isoformat() if inv.due_date else None,
+            }
+            for inv in partially_paid_purchase[:3]
+        ]
+        
         # 3 seniausios neapmokėtos gautos sąskaitos
         oldest_unpaid_purchase = unpaid_purchase[:3]
         oldest_unpaid_purchase_list = [
@@ -205,46 +256,13 @@ def dashboard_statistics(request):
             for inv in oldest_unpaid_purchase
         ]
         
-        # 3. Vėluojančios sąskaitos (overdue)
-        # Išrašytos sąskaitos su due_date < today
+        # 3. Vėluojančios sąskaitos (overdue) – VISADA visos (nepriklausomai nuo laikotarpio)
+        # Mokėjimų valdyme rodomos kaip 'overdue' arba unpaid/partially_paid, terminas praėjęs
         overdue_sales = SalesInvoice.objects.filter(
-            Q(payment_status__in=['unpaid', 'partially_paid']) &
-            Q(due_date__lt=today)
-        )
-        
-        # Filtruoti pagal pasirinktą lauką
-        if filter_by == 'due_date':
-            # Filtruoti pagal termino datą
-            if first_day_of_month and last_day_of_month:
-                overdue_sales = overdue_sales.filter(
-                    due_date__gte=first_day_of_month,
-                    due_date__lte=last_day_of_month
-                )
-        elif filter_by == 'payment_date':
-            # Filtruoti pagal mokėjimo datą
-            if first_day_of_month and last_day_of_month:
-                overdue_sales = overdue_sales.filter(
-                    payment_date__gte=first_day_of_month,
-                    payment_date__lte=last_day_of_month
-                )
-        elif filter_by == 'created_at':
-            # Filtruoti pagal sukūrimo datą
-            if first_day_of_month and last_day_of_month:
-                from django.utils import timezone as tz_util
-                date_from_dt = tz_util.make_aware(datetime.combine(first_day_of_month, datetime.min.time()))
-                date_to_dt = tz_util.make_aware(datetime.combine(last_day_of_month, datetime.max.time()))
-                overdue_sales = overdue_sales.filter(
-                    created_at__gte=date_from_dt,
-                    created_at__lte=date_to_dt
-                )
-        else:
-            # Default: filtruoti pagal issue_date
-            if first_day_of_month and last_day_of_month:
-                overdue_sales = overdue_sales.filter(
-                    issue_date__gte=first_day_of_month,
-                    issue_date__lte=last_day_of_month
-                )
-        overdue_sales = overdue_sales.select_related('partner').order_by('due_date', 'issue_date')
+            due_date__lt=today
+        ).exclude(
+            payment_status='paid'
+        ).select_related('partner').order_by('due_date', 'issue_date')
         overdue_sales_count = overdue_sales.count()
         
         # Išsaugoti queryset sąrašą prieš naudojimą (kad galėtume naudoti vėliau)
@@ -263,45 +281,12 @@ def dashboard_statistics(request):
             for inv in oldest_overdue_sales
         ]
         
-        # Gautos sąskaitos su due_date < today
+        # Gautos sąskaitos su due_date < today – VISADA visos (kaip Mokėjimų valdyme)
         overdue_purchase = PurchaseInvoice.objects.filter(
-            Q(payment_status__in=['unpaid', 'partially_paid']) &
-            Q(due_date__lt=today)
-        )
-        
-        # Filtruoti pagal pasirinktą lauką
-        if filter_by == 'due_date':
-            # Filtruoti pagal termino datą
-            if first_day_of_month and last_day_of_month:
-                overdue_purchase = overdue_purchase.filter(
-                    due_date__gte=first_day_of_month,
-                    due_date__lte=last_day_of_month
-                )
-        elif filter_by == 'payment_date':
-            # Filtruoti pagal mokėjimo datą
-            if first_day_of_month and last_day_of_month:
-                overdue_purchase = overdue_purchase.filter(
-                    payment_date__gte=first_day_of_month,
-                    payment_date__lte=last_day_of_month
-                )
-        elif filter_by == 'created_at':
-            # Filtruoti pagal sukūrimo datą
-            if first_day_of_month and last_day_of_month:
-                from django.utils import timezone as tz_util
-                date_from_dt = tz_util.make_aware(datetime.combine(first_day_of_month, datetime.min.time()))
-                date_to_dt = tz_util.make_aware(datetime.combine(last_day_of_month, datetime.max.time()))
-                overdue_purchase = overdue_purchase.filter(
-                    created_at__gte=date_from_dt,
-                    created_at__lte=date_to_dt
-                )
-        else:
-            # Default: filtruoti pagal issue_date
-            if first_day_of_month and last_day_of_month:
-                overdue_purchase = overdue_purchase.filter(
-                    issue_date__gte=first_day_of_month,
-                    issue_date__lte=last_day_of_month
-                )
-        overdue_purchase = overdue_purchase.select_related('partner').order_by('due_date', 'issue_date')
+            due_date__lt=today
+        ).exclude(
+            payment_status='paid'
+        ).select_related('partner').order_by('due_date', 'issue_date')
         overdue_purchase_count = overdue_purchase.count()
         
         # Išsaugoti queryset sąrašą prieš naudojimą (kad galėtume naudoti vėliau)
@@ -320,42 +305,19 @@ def dashboard_statistics(request):
             for inv in oldest_overdue_purchase
         ]
         
-        # 4. Užsakymai (filtruojami pagal pasirinktą datą)
-        if first_day_of_month and last_day_of_month:
-            from django.utils import timezone as tz_util
-            date_from_dt = tz_util.make_aware(datetime.combine(first_day_of_month, datetime.min.time()))
-            date_to_dt = tz_util.make_aware(datetime.combine(last_day_of_month, datetime.max.time()))
-            
-            if filter_by == 'order_date':
-                # Filtruoti pagal užsakymo datą
-                orders_this_month = Order.objects.filter(
-                    order_date__gte=date_from_dt,
-                    order_date__lte=date_to_dt
-                )
-            elif filter_by == 'loading_date':
-                # Filtruoti pagal pakrovimo datą
-                orders_this_month = Order.objects.filter(
-                    loading_date__gte=date_from_dt,
-                    loading_date__lte=date_to_dt
-                )
-            elif filter_by == 'unloading_date':
-                # Filtruoti pagal iškrovimo datą
-                orders_this_month = Order.objects.filter(
-                    unloading_date__gte=date_from_dt,
-                    unloading_date__lte=date_to_dt
-                )
-            else:
-                # Default: filtruoti pagal created_at (sukūrimo datą)
-                orders_this_month = Order.objects.filter(
-                    created_at__gte=date_from_dt,
-                    created_at__lte=date_to_dt
-                )
-        else:
-            orders_this_month = Order.objects.all()
-        
-        orders_finished = orders_this_month.filter(status='finished').count()
-        orders_unfinished = orders_this_month.exclude(status='finished').exclude(status='canceled').count()
-        orders_new = orders_this_month.filter(status='new').count()
+        # 4. Užsakymai – VISADA visi (nepriklausomai nuo laikotarpio), kad matytųsi visi statusai kaip užsakymų sąraše
+        all_orders = Order.objects.all()
+        orders_total = all_orders.count()
+        orders_new = all_orders.filter(status='new').count()
+        orders_assigned = all_orders.filter(status='assigned').count()
+        orders_executing = all_orders.filter(status='executing').count()
+        orders_waiting_for_docs = all_orders.filter(status='waiting_for_docs').count()
+        orders_waiting_for_payment = all_orders.filter(status='waiting_for_payment').count()
+        orders_finished = all_orders.filter(status='finished').count()
+        orders_closed = all_orders.filter(status='closed').count()
+        orders_canceled = all_orders.filter(status='canceled').count()
+        # Nebaigti = visi ne finished, ne closed, ne canceled (atgaliniam suderinamumui)
+        orders_unfinished = all_orders.exclude(status='finished').exclude(status='closed').exclude(status='canceled').count()
         
         # 5. Nauji klientai (filtruojami pagal pasirinktą datą)
         if first_day_of_month and last_day_of_month:
@@ -582,19 +544,59 @@ def dashboard_statistics(request):
             for order in orders_without_carriers_query.select_related('client')[:50]
         ]
         
-        # 8. Užsakymai be sąskaitų (bet kokio statuso, kurie neturi nei pardavimo, nei pirkimo sąskaitų) (NEPRIKLAUSOMAI nuo datų filtro)
-        # Tikrinti visus užsakymus, kurie neturi nei sales_invoices, nei purchase_invoices_m2m
+        # 8. Užsakymai be sąskaitų (neturi nei pardavimo [FK arba M2M], nei pirkimo sąskaitų) (NEPRIKLAUSOMAI nuo datų filtro)
+        # Pardavimo: sales_invoices (FK) + order_sales_invoices (M2M per SalesInvoiceOrder)
         orders_without_invoices_query = Order.objects.exclude(
             status='canceled'
         ).annotate(
             sales_inv_count=Count('sales_invoices'),
+            sales_m2m_count=Count('order_sales_invoices'),
             purchase_inv_count=Count('purchase_invoices_m2m')
         ).filter(
             sales_inv_count=0,
+            sales_m2m_count=0,
             purchase_inv_count=0
         ).select_related('client')
         # Tracking duomenys NENAUDOJA datų filtro - jie rodo visus aktualius užsakymus
         orders_without_invoices = orders_without_invoices_query.count()
+
+        # 8a. Užsakymai be krovinių (neturi cargo_items) (NEPRIKLAUSOMAI nuo datų filtro)
+        orders_without_cargo_query = Order.objects.exclude(
+            status='canceled'
+        ).annotate(cargo_count=Count('cargo_items')).filter(cargo_count=0)
+        orders_without_cargo = orders_without_cargo_query.count()
+        orders_without_cargo_list = [
+            {'id': o.id, 'order_number': o.order_number or f'#{o.id}', 'client_name': o.client.name if o.client else '-'}
+            for o in orders_without_cargo_query.select_related('client')[:50]
+        ]
+
+        # 8b. Užsakymai be maršruto (nauja sistema: 0 route_stops; sena: route_from/route_to ir miestai/šalys tušti)
+        orders_without_route_query = Order.objects.exclude(
+            status='canceled'
+        ).annotate(
+            route_stops_count=Count('route_stops')
+        ).filter(
+            Q(use_new_route_system=True, route_stops_count=0) |
+            Q(use_new_route_system=False, route_from='', route_to='', route_from_city='', route_from_country='', route_to_city='', route_to_country='')
+        )
+        orders_without_route = orders_without_route_query.count()
+        orders_without_route_list = [
+            {'id': o.id, 'order_number': o.order_number or f'#{o.id}', 'client_name': o.client.name if o.client else '-'}
+            for o in orders_without_route_query.select_related('client')[:50]
+        ]
+
+        # 8c. Užsakymai be kainos klientui (client_price_net tuščia arba 0)
+        orders_without_client_price_query = Order.objects.exclude(
+            status='canceled'
+        ).filter(Q(client_price_net__isnull=True) | Q(client_price_net=0))
+        orders_without_client_price = orders_without_client_price_query.count()
+
+        # 8d. Vežėjų priskyrimai be kainos (OrderCarrier su price_net tuščia arba 0)
+        carriers_without_price_query = OrderCarrier.objects.filter(
+            Q(price_net__isnull=True) | Q(price_net=0)
+        )
+        carriers_without_price_count = carriers_without_price_query.count()
+
         # Gauti užsakymų be sąskaitų sąrašą (tooltip'ui)
         orders_without_invoices_list = [
             {
@@ -651,19 +653,25 @@ def dashboard_statistics(request):
             })
         
         # 10. Užsakymai su vėluojančiomis sąskaitomis (NEPRIKLAUSOMAI nuo datų filtro)
-        # Patikrinti per sales invoices su due_date < today ARBA issue_date senesnė nei 30 dienų ir payment_status unpaid/partially_paid
-        # Naudojame related_orders ryšį per SalesInvoice
-        overdue_invoice_ids = SalesInvoice.objects.filter(
-            Q(due_date__lt=today) | Q(issue_date__lt=today - timedelta(days=30)),
-            payment_status__in=['unpaid', 'partially_paid']
+        # Išrašytos sąskaitos su terminu praėjusiu, neapmokėtos (įsk. statusą 'overdue')
+        overdue_sales_invoice_ids = SalesInvoice.objects.filter(
+            due_date__lt=today
+        ).exclude(
+            payment_status='paid'
         ).values_list('id', flat=True)
         
-        # Gauti užsakymus, susijusius su vėluojančiomis sąskaitomis
-        overdue_order_ids = SalesInvoiceOrder.objects.filter(
-            invoice_id__in=overdue_invoice_ids
+        # Užsakymai susieti per M2M (SalesInvoiceOrder) arba per FK (related_order_id)
+        order_ids_m2m = SalesInvoiceOrder.objects.filter(
+            invoice_id__in=overdue_sales_invoice_ids
         ).values_list('order_id', flat=True).distinct()
+        order_ids_fk = SalesInvoice.objects.filter(
+            id__in=overdue_sales_invoice_ids
+        ).exclude(
+            related_order_id__isnull=True
+        ).values_list('related_order_id', flat=True).distinct()
+        overdue_order_ids = set(order_ids_m2m) | set(order_ids_fk)
         
-        orders_with_overdue_query = Order.objects.filter(id__in=overdue_order_ids)
+        orders_with_overdue_query = Order.objects.filter(id__in=overdue_order_ids) if overdue_order_ids else Order.objects.none()
         # Tracking duomenys NENAUDOJA datų filtro - jie rodo visus aktualius užsakymus
         orders_with_overdue = orders_with_overdue_query.count()
         
@@ -688,9 +696,11 @@ def dashboard_statistics(request):
         ]
         
         # 12. Vežėjai su vėluojančiomis sąskaitomis (NEPRIKLAUSOMAI nuo datų filtro)
+        # Įskaitant statusą 'overdue' (kaip Mokėjimų valdyme)
         carriers_with_overdue_query = OrderCarrier.objects.filter(
-            due_date__lt=today,
-            payment_status__in=['unpaid', 'partially_paid']
+            due_date__lt=today
+        ).exclude(
+            payment_status='paid'
         )
         # Tracking duomenys NENAUDOJA datų filtro - jie rodo visus aktualius užsakymus
         # PIRMA suskaičiuoti visus, PO TO apriboti sąrašą rodymui
@@ -838,6 +848,11 @@ def dashboard_statistics(request):
                     'count': paid_sales_count,
                     'total': str(paid_sales_total),
                 },
+                'partially_paid_sales': {
+                    'count': partially_paid_sales_count,
+                    'total': str(partially_paid_sales_total),
+                    'oldest_invoices': oldest_partially_paid_sales_list,
+                },
                 'unpaid_purchase': {
                     'count': unpaid_purchase_count,
                     'total': str(unpaid_purchase_total),
@@ -846,6 +861,11 @@ def dashboard_statistics(request):
                 'paid_purchase': {
                     'count': paid_purchase_count,
                     'total': str(paid_purchase_total),
+                },
+                'partially_paid_purchase': {
+                    'count': partially_paid_purchase_count,
+                    'total': str(partially_paid_purchase_total),
+                    'oldest_invoices': oldest_partially_paid_purchase_list,
                 },
                 'overdue_sales': {
                     'count': overdue_sales_count,
@@ -857,9 +877,16 @@ def dashboard_statistics(request):
                 }
             },
             'orders': {
+                'total': orders_total,
+                'new': orders_new,
+                'assigned': orders_assigned,
+                'executing': orders_executing,
+                'waiting_for_docs': orders_waiting_for_docs,
+                'waiting_for_payment': orders_waiting_for_payment,
                 'finished': orders_finished,
+                'closed': orders_closed,
+                'canceled': orders_canceled,
                 'unfinished': orders_unfinished,
-                'new': orders_new
             },
             'clients': {
                 'new_this_month': new_clients_count
@@ -878,6 +905,10 @@ def dashboard_statistics(request):
                 'without_carriers': orders_without_carriers,
                 'finished_without_invoices': orders_without_invoices,  # Dabar rodo visus užsakymus be sąskaitų, ne tik baigtus
                 'with_overdue_invoices': orders_with_overdue,
+                'without_cargo': orders_without_cargo,
+                'without_route': orders_without_route,
+                'without_client_price': orders_without_client_price,
+                'without_carrier_price': carriers_without_price_count,
                 'upcoming': upcoming_orders_list,
             },
             'carriers_tracking': {
@@ -903,42 +934,41 @@ def dashboard_statistics(request):
 @permission_classes([IsAuthenticated])
 def clients_with_overdue_invoices(request):
     """
-    Grąžina klientus su daugiausiai vėluojančių apmokėti sąskaitų.
+    Grąžina klientus (partnerius su is_client=True), kurie turi bent vieną vėluojančią išrašytą sąskaitą.
     Surūšiuoti pagal vėluojančių sąskaitų skaičių (mažėjančiai).
     """
     try:
         today = timezone.now().date()
         
-        # Rasti klientus su vėluojančiomis sąskaitomis
+        # Partnerių ID, kurie turi bent vieną vėluojančią pardavimo (išrašytą) sąskaitą – terminas praėjo ir neapmokėta
+        # Vėluojančios = due_date < today ir payment_status != 'paid' (unpaid, partially_paid, overdue)
+        overdue_partner_ids = SalesInvoice.objects.filter(
+            due_date__lt=today
+        ).exclude(
+            payment_status='paid'
+        ).values_list('partner_id', flat=True).distinct()
+        
+        # Visi partneriai, kuriems priskirtos vėluojančios išrašytos sąskaitos (nepriklausomai nuo is_client)
         clients_with_overdue = Partner.objects.filter(
-            is_client=True,
-            sales_invoices__payment_status__in=['unpaid', 'partially_paid'],
-            sales_invoices__due_date__lt=today
-        ).annotate(
-            overdue_count=Count('sales_invoices', filter=Q(
-                sales_invoices__payment_status__in=['unpaid', 'partially_paid'],
-                sales_invoices__due_date__lt=today
-            )),
-            overdue_total=Sum('sales_invoices__amount_total', filter=Q(
-                sales_invoices__payment_status__in=['unpaid', 'partially_paid'],
-                sales_invoices__due_date__lt=today
-            ))
-        ).filter(overdue_count__gt=0).order_by('-overdue_count', '-overdue_total')[:20]
+            id__in=overdue_partner_ids
+        ).order_by('name')
         
         clients_list = []
         for client in clients_with_overdue:
             # Gauti visas vėluojančias sąskaitas
             overdue_invoices = SalesInvoice.objects.filter(
                 partner=client,
-                payment_status__in=['unpaid', 'partially_paid'],
                 due_date__lt=today
+            ).exclude(
+                payment_status='paid'
             ).order_by('due_date')
             
+            total = overdue_invoices.aggregate(s=Sum('amount_total'))['s'] or Decimal('0.00')
             clients_list.append({
                 'id': client.id,
                 'name': client.name,
-                'overdue_count': client.overdue_count or 0,
-                'overdue_total': str(client.overdue_total or Decimal('0.00')),
+                'overdue_count': overdue_invoices.count(),
+                'overdue_total': str(total),
                 'oldest_overdue_date': overdue_invoices[0].due_date.isoformat() if overdue_invoices.exists() else None,
                 'invoices': [
                     {
@@ -950,6 +980,10 @@ def clients_with_overdue_invoices(request):
                     for inv in overdue_invoices[:5]  # Pirmos 5 sąskaitos
                 ]
             })
+        
+        # Rūšiuoti pagal vėluojančių skaičių (mažėjančiai), tada pagal sumą
+        clients_list.sort(key=lambda c: (-c['overdue_count'], -float(c['overdue_total'])))
+        clients_list = clients_list[:20]
         
         return Response({
             'clients': clients_list
@@ -965,54 +999,56 @@ def clients_with_overdue_invoices(request):
 @permission_classes([IsAuthenticated])
 def carriers_with_overdue_invoices(request):
     """
-    Grąžina vežėjus su daugiausiai vėluojančių apmokėti sąskaitų.
-    Surūšiuoti pagal vėluojančių sąskaitų skaičių (mažėjančiai).
+    Grąžina partnerius (tiekėjus/vežėjus), kurie turi bent vieną vėluojančią GAUTĄ sąskaitą (PurchaseInvoice).
+    Tai atitinka tai, ką vartotojas mato Mokėjimų valdyme – gautos sąskaitos su terminu praėjusiu.
     """
     try:
         today = timezone.now().date()
         
-        # Rasti vežėjus su vėluojančiomis sąskaitomis per OrderCarrier
-        # Vežėjai yra tie partneriai, kurie yra OrderCarrier įrašuose
+        # Partnerių ID, kurie turi bent vieną vėluojančią pirkimo (gautą) sąskaitą
+        overdue_partner_ids = PurchaseInvoice.objects.filter(
+            due_date__lt=today
+        ).exclude(
+            payment_status='paid'
+        ).values_list('partner_id', flat=True).distinct()
+        
+        # Partneriai (tiekėjai/vežėjai) iš to sąrašo
         carriers_with_overdue = Partner.objects.filter(
-            order_carriers__due_date__lt=today,
-            order_carriers__payment_status__in=['unpaid', 'partially_paid']
-        ).annotate(
-            overdue_count=Count('order_carriers', filter=Q(
-                order_carriers__due_date__lt=today,
-                order_carriers__payment_status__in=['unpaid', 'partially_paid']
-            )),
-            overdue_total=Sum('order_carriers__price_net', filter=Q(
-                order_carriers__due_date__lt=today,
-                order_carriers__payment_status__in=['unpaid', 'partially_paid']
-            ))
-        ).filter(overdue_count__gt=0).distinct().order_by('-overdue_count', '-overdue_total')[:20]
+            id__in=overdue_partner_ids
+        ).order_by('name')
         
         carriers_list = []
         for carrier in carriers_with_overdue:
-            # Gauti visas vėluojančias sąskaitas per OrderCarrier
-            overdue_carriers = OrderCarrier.objects.filter(
+            # Visos vėluojančios gautos sąskaitos šiam partneriui
+            overdue_invoices = PurchaseInvoice.objects.filter(
                 partner=carrier,
-                due_date__lt=today,
-                payment_status__in=['unpaid', 'partially_paid']
-            ).select_related('order').order_by('due_date')
+                due_date__lt=today
+            ).exclude(
+                payment_status='paid'
+            ).order_by('due_date')
             
+            total = overdue_invoices.aggregate(s=Sum('amount_total'))['s'] or Decimal('0.00')
             carriers_list.append({
                 'id': carrier.id,
                 'name': carrier.name,
-                'overdue_count': carrier.overdue_count or 0,
-                'overdue_total': str(carrier.overdue_total or Decimal('0.00')),
-                'oldest_overdue_date': overdue_carriers[0].due_date.isoformat() if overdue_carriers.exists() else None,
+                'overdue_count': overdue_invoices.count(),
+                'overdue_total': str(total),
+                'oldest_overdue_date': overdue_invoices[0].due_date.isoformat() if overdue_invoices.exists() else None,
                 'orders': [
                     {
-                        'order_id': oc.order.id,
-                        'order_number': oc.order.order_number or f'#{oc.order.id}',
-                        'price_net': str(oc.price_net) if oc.price_net else '0.00',
-                        'due_date': oc.due_date.isoformat() if oc.due_date else None,
-                        'overdue_days': (today - oc.due_date).days if oc.due_date else 0,
+                        'order_id': None,
+                        'order_number': inv.received_invoice_number or inv.invoice_number or f'INV{inv.id}',
+                        'price_net': str(inv.amount_total),
+                        'due_date': inv.due_date.isoformat() if inv.due_date else None,
+                        'overdue_days': (today - inv.due_date).days if inv.due_date else 0,
                     }
-                    for oc in overdue_carriers[:5]  # Pirmi 5 užsakymai
+                    for inv in overdue_invoices[:5]  # Pirmos 5 sąskaitos
                 ]
             })
+        
+        # Rūšiuoti pagal vėluojančių skaičių (mažėjančiai), tada pagal sumą
+        carriers_list.sort(key=lambda c: (-c['overdue_count'], -float(c['overdue_total'])))
+        carriers_list = carriers_list[:20]
         
         return Response({
             'carriers': carriers_list

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { api } from '../services/api';
+import { formatMoney } from '../utils/formatMoney';
 import './PartnersPage.css';
 
 interface Contact {
@@ -19,6 +20,10 @@ interface Partner {
   code: string;
   vat_code: string;
   address: string;
+  code_valid?: boolean;
+  vat_code_valid?: boolean;
+  company_code_format?: 'current' | 'legacy' | null;
+  has_code_errors?: boolean;
   is_client: boolean;
   is_supplier: boolean;
   status: string;
@@ -34,10 +39,26 @@ interface Partner {
   notes: string;
 }
 
+interface PartnerInvoiceRow {
+  id: number;
+  invoice_number?: string;
+  received_invoice_number?: string;
+  issue_date: string;
+  due_date: string;
+  payment_date: string | null;
+  payment_status: string;
+  payment_status_display?: string;
+  amount_total: string;
+  paid_amount?: string;
+  remaining_amount?: string;
+  overdue_days?: number;
+}
+
 const PartnersPage: React.FC = () => {
   const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<'all' | 'clients' | 'suppliers'>('all');
+  const [filter, setFilter] = useState<'all' | 'clients' | 'suppliers' | 'with_errors' | 'with_contacts' | 'without_contacts'>('all');
+  const [codeErrorsCount, setCodeErrorsCount] = useState<number>(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
@@ -59,6 +80,14 @@ const PartnersPage: React.FC = () => {
   const [editingContactData, setEditingContactData] = useState<Contact | null>(null);
   const [newContactData, setNewContactData] = useState<NewContact>({ first_name: '', last_name: '', email: '', phone: '', position: '', notes: '' });
   const [showAddContactForm, setShowAddContactForm] = useState(false);
+  type PartnerModalTab = 'rekvizitai' | 'nustatymai' | 'kontaktai' | 'finansai';
+  const [partnerModalTab, setPartnerModalTab] = useState<PartnerModalTab>('rekvizitai');
+  const [partnerSalesInvoices, setPartnerSalesInvoices] = useState<PartnerInvoiceRow[]>([]);
+  const [partnerPurchaseInvoices, setPartnerPurchaseInvoices] = useState<PartnerInvoiceRow[]>([]);
+  const [partnerInvoicesLoading, setPartnerInvoicesLoading] = useState(false);
+  const FINANSAI_PAGE_SIZE = 10;
+  const [finansaiSalesPage, setFinansaiSalesPage] = useState(1);
+  const [finansaiPurchasePage, setFinansaiPurchasePage] = useState(1);
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string; visible: boolean }>({ type: 'info', message: '', visible: false });
   const toastTimeoutRef = useRef<number | null>(null);
   const showToast = (type: 'success' | 'error' | 'info', message: string, timeoutMs = 3500) => {
@@ -118,7 +147,17 @@ const PartnersPage: React.FC = () => {
       } else if (filter === 'suppliers') {
         params.is_supplier = true;
       }
-      
+      // „Su klaidomis“ – rodyti tik partnerius su neteisingais įm. / PVM kodais
+      if (filter === 'with_errors') {
+        params.code_errors = 'only';
+      }
+      // Su kontaktiniais asmenimis / be kontaktinių asmenų
+      if (filter === 'with_contacts') {
+        params.has_contacts = '1';
+      } else if (filter === 'without_contacts') {
+        params.has_contacts = '0';
+      }
+
       const response = await api.get('/partners/partners/', { params });
       
       // Backend naudoja pagination
@@ -135,6 +174,16 @@ const PartnersPage: React.FC = () => {
       
       setAllPartners(partnersData);
       setTotalCount(total);
+      if (filter === 'with_errors') {
+        setCodeErrorsCount(total);
+      } else {
+        try {
+          const countRes = await api.get('/partners/partners/code_errors_count/');
+          setCodeErrorsCount(countRes.data?.count ?? 0);
+        } catch {
+          setCodeErrorsCount(0);
+        }
+      }
     } catch (error: any) {
       setAllPartners([]);
       setTotalCount(0);
@@ -226,9 +275,37 @@ const PartnersPage: React.FC = () => {
   };
 
 
+  const fetchPartnerInvoices = useCallback(async (partnerId: number) => {
+    setPartnerInvoicesLoading(true);
+    try {
+      const [salesRes, purchaseRes] = await Promise.all([
+        api.get('/invoices/sales/', { params: { partner: partnerId, page_size: 500 } }),
+        api.get('/invoices/purchase/', { params: { partner: partnerId, page_size: 500 } }),
+      ]);
+      const salesList = salesRes.data?.results ?? salesRes.data ?? [];
+      const purchaseList = purchaseRes.data?.results ?? purchaseRes.data ?? [];
+      setPartnerSalesInvoices(Array.isArray(salesList) ? salesList : []);
+      setPartnerPurchaseInvoices(Array.isArray(purchaseList) ? purchaseList : []);
+      setFinansaiSalesPage(1);
+      setFinansaiPurchasePage(1);
+    } catch (e) {
+      setPartnerSalesInvoices([]);
+      setPartnerPurchaseInvoices([]);
+    } finally {
+      setPartnerInvoicesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (partnerModalTab === 'finansai' && selectedPartner?.id) {
+      fetchPartnerInvoices(selectedPartner.id);
+    }
+  }, [partnerModalTab, selectedPartner?.id, fetchPartnerInvoices]);
+
   const handleShowDetails = (partner: Partner) => {
     setSelectedPartner(partner);
     setShowPartnerDetails(true);
+    setPartnerModalTab('rekvizitai');
     setIsEditingPartner(false);
     setEditingContactId(null);
     setEditingContactData(null);
@@ -611,7 +688,9 @@ const PartnersPage: React.FC = () => {
     const clients = allPartners.filter(p => p.is_client).length;
     const suppliers = allPartners.filter(p => p.is_supplier).length;
     const active = allPartners.filter(p => p.status === 'active').length;
-    return { total, clients, suppliers, active };
+    const withContacts = allPartners.filter(p => (p.contacts_count ?? 0) > 0).length;
+    const withoutContacts = total - withContacts;
+    return { total, clients, suppliers, active, withContacts, withoutContacts };
   }, [allPartners]);
 
   return (
@@ -828,6 +907,61 @@ const PartnersPage: React.FC = () => {
                     }}
                   >
                     Tiekėjai ({stats.suppliers})
+                  </button>
+                  <button
+                    onClick={() => setFilter('with_errors')}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      backgroundColor: filter === 'with_errors' ? '#e74c3c' : '#f8f9fa',
+                      color: filter === 'with_errors' ? 'white' : '#495057',
+                      transition: 'all 0.2s',
+                      textAlign: 'left'
+                    }}
+                    title="Partneriai su neteisingu įmonės arba PVM kodu – juos reikės sutvarkyti"
+                  >
+                    Su klaidomis ({codeErrorsCount})
+                  </button>
+                  <button
+                    onClick={() => setFilter('with_contacts')}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      backgroundColor: filter === 'with_contacts' ? '#27ae60' : '#f8f9fa',
+                      color: filter === 'with_contacts' ? 'white' : '#495057',
+                      transition: 'all 0.2s',
+                      textAlign: 'left'
+                    }}
+                  >
+                    Su kontaktiniais asmenimis ({stats.withContacts})
+                  </button>
+                  <button
+                    onClick={() => setFilter('without_contacts')}
+                    style={{
+                      width: '100%',
+                      padding: '10px',
+                      border: 'none',
+                      borderRadius: '6px',
+                      fontSize: '13px',
+                      fontWeight: '600',
+                      cursor: 'pointer',
+                      backgroundColor: filter === 'without_contacts' ? '#8e44ad' : '#f8f9fa',
+                      color: filter === 'without_contacts' ? 'white' : '#495057',
+                      transition: 'all 0.2s',
+                      textAlign: 'left'
+                    }}
+                  >
+                    Be kontaktinių asmenų ({stats.withoutContacts})
                   </button>
                 </div>
               </div>
@@ -1050,6 +1184,21 @@ const PartnersPage: React.FC = () => {
                             <span className={`badge badge-status ${partner.status === 'active' ? 'active' : 'inactive'}`}>
                               {partner.status === 'active' ? 'Aktyvus' : 'Neaktyvus'}
                             </span>
+                            {partner.code_valid === false && (
+                              <span className="badge badge-invalid-codes" title="Įmonės kodas turi būti 7 arba 9 skaitmenys (tik skaičiai)">
+                                Netinkamas įm. kodas
+                              </span>
+                            )}
+                            {partner.vat_code_valid === false && (
+                              <span className="badge badge-invalid-codes" title="PVM kodas – tuščias arba ES šalies formatas (pvz. LT, PL, DE)">
+                                Netinkamas PVM
+                              </span>
+                            )}
+                            {partner.code_valid !== false && partner.company_code_format === 'legacy' && (
+                              <span className="badge badge-legacy-code" title="Senasis įmonės kodo formatas (7 skaitmenys, iki ~2004 m.)">
+                                Pasenęs kodas (7 sk.)
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1161,9 +1310,9 @@ const PartnersPage: React.FC = () => {
             position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
             backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
           }}>
-            <div className="card" style={{ width: '90%', maxWidth: '800px', maxHeight: '90vh', overflow: 'auto' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0 }}>Partnerio informacija</h2>
+            <div className="card partner-detail-modal" style={{ width: '90%', maxWidth: '800px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, padding: '12px 16px', borderBottom: '1px solid #e0e0e0' }}>
+                <h2 style={{ margin: 0, fontSize: '18px' }}>{selectedPartner.name}</h2>
                 <div style={{ display: 'flex', gap: 8 }}>
                   {!isEditingPartner ? (
                     <>
@@ -1178,7 +1327,16 @@ const PartnersPage: React.FC = () => {
                   )}
                 </div>
               </div>
-              <div style={{ marginTop: 16 }}>
+              <div className="partner-modal-tabs" style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '0 12px', backgroundColor: '#f8f9fa', borderBottom: '1px solid #dee2e6', flexShrink: 0 }}>
+                <button type="button" className={`partner-tab-btn ${partnerModalTab === 'rekvizitai' ? 'active' : ''}`} onClick={() => setPartnerModalTab('rekvizitai')}>📋 Rekvizitai</button>
+                <button type="button" className={`partner-tab-btn ${partnerModalTab === 'kontaktai' ? 'active' : ''}`} onClick={() => setPartnerModalTab('kontaktai')}>👥 Kontaktai {selectedPartner.contacts_count ? `(${selectedPartner.contacts_count})` : ''}</button>
+                <button type="button" className={`partner-tab-btn ${partnerModalTab === 'finansai' ? 'active' : ''}`} onClick={() => setPartnerModalTab('finansai')}>💰 Finansai</button>
+                <span style={{ flex: 1 }} />
+                <button type="button" className={`partner-tab-btn ${partnerModalTab === 'nustatymai' ? 'active' : ''}`} onClick={() => setPartnerModalTab('nustatymai')}>⚙️ Nustatymai</button>
+              </div>
+              <div className="partner-modal-content" style={{ flex: 1, minHeight: 420, overflowY: 'auto', overflowX: 'hidden', padding: '16px' }}>
+                {partnerModalTab === 'rekvizitai' && (
+                <>
                 <div className="form-group">
                   <label>Pavadinimas {isEditingPartner && '*'}</label>
                   {!isEditingPartner ? (
@@ -1203,11 +1361,31 @@ const PartnersPage: React.FC = () => {
                     </div>
                   )}
                 </div>
+                {!isEditingPartner && (
+                  <div className="form-group" style={{ marginBottom: 12 }}>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleCheckVies}
+                      title="Tikrinti internete (VIES)"
+                    >
+                      Tikrinti internete
+                    </button>
+                  </div>
+                )}
                 <div className="form-group" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
                     <label>Įmonės kodas {isEditingPartner && '*'}</label>
                     {!isEditingPartner ? (
-                      <div>{selectedPartner.code}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {selectedPartner.code}
+                        {selectedPartner.code_valid === false && (
+                          <span className="badge badge-invalid-codes" title="Turėtų būti 7 arba 9 skaitmenys (tik skaičiai)">Įmonės kodas neteisingas</span>
+                        )}
+                        {selectedPartner.code_valid !== false && selectedPartner.company_code_format === 'legacy' && (
+                          <span className="badge badge-legacy-code" title="Senasis formatas (7 skaitmenys), vis dar galiojantis">Pasenęs formatas (7 sk.)</span>
+                        )}
+                      </div>
                     ) : (
                       <input
                         type="text"
@@ -1220,7 +1398,12 @@ const PartnersPage: React.FC = () => {
                   <div>
                     <label>PVM kodas</label>
                     {!isEditingPartner ? (
-                      <div>{selectedPartner.vat_code || '-'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {selectedPartner.vat_code || '-'}
+                        {selectedPartner.vat_code_valid === false && selectedPartner.vat_code && (
+                          <span className="badge badge-invalid-codes" title="Turėtų būti ES šalies PVM formatas (pvz. LT, PL, DE) arba tuščias">PVM kodas neteisingas</span>
+                        )}
+                      </div>
                     ) : (
                       <input
                         type="text"
@@ -1230,6 +1413,19 @@ const PartnersPage: React.FC = () => {
                     )}
                   </div>
                 </div>
+                {(selectedPartner.code_valid === false || selectedPartner.vat_code_valid === false) && (
+                  <div style={{ marginTop: -8, marginBottom: 12, padding: '10px 12px', background: '#fff8e6', border: '1px solid #f39c12', borderRadius: 8, fontSize: 13 }}>
+                    {selectedPartner.code_valid === false && selectedPartner.vat_code_valid === false && (
+                      <>⚠️ <strong>Įmonės kodas neteisingas:</strong> turi būti 7 arba 9 skaitmenys (tik skaičiai). <strong>PVM kodas neteisingas:</strong> turi būti tuščias arba ES šalies formatas (pvz. LT, PL, DE – šalies kodas + skaitmenys/raidės pagal šalį).</>
+                    )}
+                    {selectedPartner.code_valid === false && selectedPartner.vat_code_valid !== false && (
+                      <>⚠️ <strong>Įmonės kodas neteisingas:</strong> turi būti 7 arba 9 skaitmenys (tik skaičiai).</>
+                    )}
+                    {selectedPartner.code_valid !== false && selectedPartner.vat_code_valid === false && (
+                      <>⚠️ <strong>PVM kodas neteisingas:</strong> turi būti tuščias arba ES šalies formatas (pvz. LT, PL, DE, FR, NL – šalies kodas + skaitmenys/raidės pagal šalį). Tarpus ir brūkšnelius sistema ignoruoja.</>
+                    )}
+                  </div>
+                )}
                 <div className="form-group">
                   <label>Adresas</label>
                   {!isEditingPartner ? (
@@ -1310,7 +1506,11 @@ const PartnersPage: React.FC = () => {
                     />
                   )}
                 </div>
+                </>
+                )}
 
+                {partnerModalTab === 'nustatymai' && (
+                <>
                 {isEditingPartner && editingPartnerData && editingPartnerData.is_client && (
                   <div className="form-group" style={{ marginTop: '20px', padding: '15px', backgroundColor: '#f0f9ff', borderRadius: '4px', border: '1px solid #bae6fd' }}>
                     <h3 style={{ marginTop: 0, marginBottom: '12px', fontSize: '16px' }}>El. pašto priminimai (tik klientams)</h3>
@@ -1406,9 +1606,12 @@ const PartnersPage: React.FC = () => {
                     </small>
                   </div>
                 )}
+                </>
+                )}
 
-                <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #e0e0e0' }}>
-                  <h3>Kontaktiniai asmenys</h3>
+                {partnerModalTab === 'kontaktai' && (
+                <div style={{ paddingTop: 0 }}>
+                  <h3 style={{ marginTop: 0, marginBottom: 12, fontSize: '16px' }}>Kontaktiniai asmenys</h3>
                   {selectedPartner.contacts && selectedPartner.contacts.length > 0 ? (
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                       {selectedPartner.contacts.map((c) => (
@@ -1518,108 +1721,236 @@ const PartnersPage: React.FC = () => {
                   ) : (
                     <div style={{ fontSize: 13, color: '#666' }}>Kontaktinių asmenų nėra</div>
                   )}
-                  
-                  {!isEditingPartner && (
-                    <div style={{ marginTop: 12, borderTop: '1px solid #e0e0e0', paddingTop: 12 }}>
-                      {!showAddContactForm ? (
-                        <button
-                          type="button"
-                          className="button"
-                          onClick={() => setShowAddContactForm(true)}
-                          style={{ fontSize: '13px', padding: '6px 12px' }}
-                        >
-                          + Pridėti kontaktą
-                        </button>
-                      ) : (
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                            <h4 style={{ margin: 0, fontSize: '14px' }}>Pridėti kontaktą</h4>
-                            <button
-                              type="button"
-                              className="button button-secondary"
-                              onClick={() => {
-                                setShowAddContactForm(false);
-                                setNewContactData({ first_name: '', last_name: '', email: '', phone: '', position: '', notes: '' });
-                              }}
-                              style={{ fontSize: '11px', padding: '4px 8px' }}
-                            >
-                              ✕
-                            </button>
+
+                  <div style={{ marginTop: 12, borderTop: '1px solid #e0e0e0', paddingTop: 12 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: '14px' }}>Naujas kontaktas</h4>
+                    {!showAddContactForm ? (
+                      <button
+                        type="button"
+                        className="button"
+                        onClick={() => setShowAddContactForm(true)}
+                        style={{ fontSize: '13px', padding: '6px 12px' }}
+                      >
+                        + Pridėti kontaktą
+                      </button>
+                    ) : (
+                      <div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <div className="form-group" style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: '12px', marginBottom: 4 }}>Vardas</label>
+                            <input
+                              type="text"
+                              value={newContactData.first_name || ''}
+                              onChange={(e) => setNewContactData({ ...newContactData, first_name: e.target.value })}
+                              style={{ fontSize: '13px', padding: '6px' }}
+                            />
                           </div>
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                            <div className="form-group" style={{ marginBottom: 8 }}>
-                              <label style={{ fontSize: '12px', marginBottom: 4 }}>Vardas</label>
-                              <input
-                                type="text"
-                                value={newContactData.first_name || ''}
-                                onChange={(e) => setNewContactData({ ...newContactData, first_name: e.target.value })}
-                                style={{ fontSize: '13px', padding: '6px' }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 8 }}>
-                              <label style={{ fontSize: '12px', marginBottom: 4 }}>Pavardė</label>
-                              <input
-                                type="text"
-                                value={newContactData.last_name || ''}
-                                onChange={(e) => setNewContactData({ ...newContactData, last_name: e.target.value })}
-                                style={{ fontSize: '13px', padding: '6px' }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 8 }}>
-                              <label style={{ fontSize: '12px', marginBottom: 4 }}>El. paštas</label>
-                              <input
-                                type="email"
-                                value={newContactData.email || ''}
-                                onChange={(e) => setNewContactData({ ...newContactData, email: e.target.value })}
-                                style={{ fontSize: '13px', padding: '6px' }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 8 }}>
-                              <label style={{ fontSize: '12px', marginBottom: 4 }}>Telefonas</label>
-                              <input
-                                type="tel"
-                                value={newContactData.phone || ''}
-                                onChange={(e) => setNewContactData({ ...newContactData, phone: e.target.value })}
-                                style={{ fontSize: '13px', padding: '6px' }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 8 }}>
-                              <label style={{ fontSize: '12px', marginBottom: 4 }}>Pareigos</label>
-                              <input
-                                type="text"
-                                value={newContactData.position || ''}
-                                onChange={(e) => setNewContactData({ ...newContactData, position: e.target.value })}
-                                style={{ fontSize: '13px', padding: '6px' }}
-                              />
-                            </div>
-                            <div className="form-group" style={{ marginBottom: 8 }}>
-                              <label style={{ fontSize: '12px', marginBottom: 4 }}>Pastabos</label>
-                              <textarea
-                                value={newContactData.notes || ''}
-                                onChange={(e) => setNewContactData({ ...newContactData, notes: e.target.value })}
-                                style={{ fontSize: '13px', padding: '6px', minHeight: '60px' }}
-                              />
-                            </div>
+                          <div className="form-group" style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: '12px', marginBottom: 4 }}>Pavardė</label>
+                            <input
+                              type="text"
+                              value={newContactData.last_name || ''}
+                              onChange={(e) => setNewContactData({ ...newContactData, last_name: e.target.value })}
+                              style={{ fontSize: '13px', padding: '6px' }}
+                            />
                           </div>
-                          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-                            <button type="button" className="button" onClick={handleAddContact} style={{ fontSize: '13px', padding: '6px 12px' }}>Pridėti</button>
-                            <button
-                              type="button"
-                              className="button button-secondary"
-                              onClick={() => {
-                                setShowAddContactForm(false);
-                                setNewContactData({ first_name: '', last_name: '', email: '', phone: '', position: '', notes: '' });
-                              }}
-                              style={{ fontSize: '13px', padding: '6px 12px' }}
-                            >
-                              Atšaukti
-                            </button>
+                          <div className="form-group" style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: '12px', marginBottom: 4 }}>El. paštas</label>
+                            <input
+                              type="email"
+                              value={newContactData.email || ''}
+                              onChange={(e) => setNewContactData({ ...newContactData, email: e.target.value })}
+                              style={{ fontSize: '13px', padding: '6px' }}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: '12px', marginBottom: 4 }}>Telefonas</label>
+                            <input
+                              type="tel"
+                              value={newContactData.phone || ''}
+                              onChange={(e) => setNewContactData({ ...newContactData, phone: e.target.value })}
+                              style={{ fontSize: '13px', padding: '6px' }}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: '12px', marginBottom: 4 }}>Pareigos</label>
+                            <input
+                              type="text"
+                              value={newContactData.position || ''}
+                              onChange={(e) => setNewContactData({ ...newContactData, position: e.target.value })}
+                              style={{ fontSize: '13px', padding: '6px' }}
+                            />
+                          </div>
+                          <div className="form-group" style={{ marginBottom: 8 }}>
+                            <label style={{ fontSize: '12px', marginBottom: 4 }}>Pastabos</label>
+                            <textarea
+                              value={newContactData.notes || ''}
+                              onChange={(e) => setNewContactData({ ...newContactData, notes: e.target.value })}
+                              style={{ fontSize: '13px', padding: '6px', minHeight: '60px' }}
+                            />
                           </div>
                         </div>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                          <button type="button" className="button" onClick={handleAddContact} style={{ fontSize: '13px', padding: '6px 12px' }}>Pridėti</button>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => {
+                              setShowAddContactForm(false);
+                              setNewContactData({ first_name: '', last_name: '', email: '', phone: '', position: '', notes: '' });
+                            }}
+                            style={{ fontSize: '13px', padding: '6px 12px' }}
+                          >
+                            Atšaukti
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                )}
+
+                {partnerModalTab === 'finansai' && (
+                <div className="partner-finansai-tab" style={{ paddingTop: 0 }}>
+                  <p style={{ margin: '0 0 12px', fontSize: 13, color: '#555' }}>
+                    Sąskaitų laiku apmokėjimas skaičiuojamas nuo išrašymo datos iki apmokėjimo datos (ne iki žymėjimo).
+                  </p>
+                  {partnerInvoicesLoading ? (
+                    <div style={{ padding: 24, textAlign: 'center' }}>Kraunama...</div>
+                  ) : (
+                    <>
+                      <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: '15px' }}>Išrašytos šiai įmonei sąskaitos (pardavimo)</h3>
+                      {partnerSalesInvoices.length > 0 ? (
+                        <>
+                          <div style={{ overflowX: 'auto', marginBottom: 8 }}>
+                            <table className="table" style={{ fontSize: 13 }}>
+                              <thead>
+                                <tr>
+                                  <th>Nr.</th>
+                                  <th>Išrašymo data</th>
+                                  <th>Terminas</th>
+                                  <th>Apmokėjimo data</th>
+                                  <th>Suma</th>
+                                  <th>Būsena</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {partnerSalesInvoices
+                                  .slice((finansaiSalesPage - 1) * FINANSAI_PAGE_SIZE, finansaiSalesPage * FINANSAI_PAGE_SIZE)
+                                  .map((inv) => {
+                                  const issue = inv.issue_date || '';
+                                  const due = inv.due_date || '';
+                                  const paidDate = inv.payment_date || null;
+                                  const isPaid = inv.payment_status === 'paid';
+                                  const isOnTime = isPaid && paidDate && due && new Date(paidDate) <= new Date(due);
+                                  const isOverdue = inv.payment_status === 'overdue' || (isPaid && paidDate && due && new Date(paidDate) > new Date(due));
+                                  const debt = (inv.payment_status !== 'paid' && inv.remaining_amount) ? parseFloat(String(inv.remaining_amount)) : 0;
+                                  const today = new Date(); today.setHours(0, 0, 0, 0);
+                                  const dueD = due ? new Date(due) : null;
+                                  const paidD = paidDate ? new Date(paidDate) : null;
+                                  const daysOverdue = !isPaid && dueD ? Math.max(0, Math.floor((today.getTime() - dueD.getTime()) / 86400000)) : (isPaid && paidD && dueD ? Math.max(0, Math.floor((paidD.getTime() - dueD.getTime()) / 86400000)) : 0);
+                                  const daysEarly = isPaid && paidD && dueD ? Math.max(0, Math.floor((dueD.getTime() - paidD.getTime()) / 86400000)) : 0;
+                                  return (
+                                    <tr key={`s-${inv.id}`}>
+                                      <td>{inv.invoice_number || inv.id}</td>
+                                      <td>{issue}</td>
+                                      <td>{due}</td>
+                                      <td>{paidDate || '–'}</td>
+                                      <td>{formatMoney(inv.amount_total)}</td>
+                                      <td>
+                                        {!isPaid && daysOverdue > 0 && <span className="badge badge-danger" style={{ marginRight: 4 }}>Vėluoja {daysOverdue} d.</span>}
+                                        {isPaid && isOverdue && daysOverdue > 0 && <span className="badge badge-danger" style={{ marginRight: 4 }}>Apmokėta {daysOverdue} d. vėlu</span>}
+                                        {!isPaid && debt > 0 && <span className="badge badge-warning" style={{ marginRight: 4 }}>Skola: {formatMoney(debt)}</span>}
+                                        {isPaid && daysEarly > 0 && <span className="badge badge-success" style={{ marginRight: 4 }}>Apmokėta {daysEarly} d. anksčiau</span>}
+                                        {isPaid && daysEarly === 0 && isOnTime && <span className="badge badge-success">Laiku apmokėta</span>}
+                                        {isPaid && !isOnTime && !isOverdue && <span className="badge badge-info">Apmokėta</span>}
+                                        {!isPaid && daysOverdue === 0 && debt === 0 && inv.payment_status_display}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          {Math.ceil(partnerSalesInvoices.length / FINANSAI_PAGE_SIZE) > 1 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20, fontSize: 13 }}>
+                              <button type="button" className="button button-secondary" style={{ padding: '4px 10px' }} disabled={finansaiSalesPage <= 1} onClick={() => setFinansaiSalesPage((p) => Math.max(1, p - 1))}>Ankstesnis</button>
+                              <span>Puslapis {finansaiSalesPage} iš {Math.ceil(partnerSalesInvoices.length / FINANSAI_PAGE_SIZE)}</span>
+                              <button type="button" className="button button-secondary" style={{ padding: '4px 10px' }} disabled={finansaiSalesPage >= Math.ceil(partnerSalesInvoices.length / FINANSAI_PAGE_SIZE)} onClick={() => setFinansaiSalesPage((p) => p + 1)}>Kitas</button>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{ marginBottom: 20, fontSize: 13, color: '#666' }}>Išrašytų sąskaitų nėra</div>
                       )}
-                    </div>
+                      <h3 style={{ marginBottom: 8, fontSize: '15px' }}>Gautos iš šios įmonės sąskaitos (pirkimo)</h3>
+                      {partnerPurchaseInvoices.length > 0 ? (
+                        <>
+                          <div style={{ overflowX: 'auto', marginBottom: 8 }}>
+                            <table className="table" style={{ fontSize: 13 }}>
+                              <thead>
+                                <tr>
+                                  <th>Nr.</th>
+                                  <th>Išrašymo data</th>
+                                  <th>Terminas</th>
+                                  <th>Apmokėjimo data</th>
+                                  <th>Suma</th>
+                                  <th>Būsena</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {partnerPurchaseInvoices
+                                  .slice((finansaiPurchasePage - 1) * FINANSAI_PAGE_SIZE, finansaiPurchasePage * FINANSAI_PAGE_SIZE)
+                                  .map((inv) => {
+                                  const issue = inv.issue_date || '';
+                                  const due = inv.due_date || '';
+                                  const paidDate = inv.payment_date || null;
+                                  const isPaid = inv.payment_status === 'paid';
+                                  const isOnTime = isPaid && paidDate && due && new Date(paidDate) <= new Date(due);
+                                  const isOverdue = inv.payment_status === 'overdue' || (isPaid && paidDate && due && new Date(paidDate) > new Date(due));
+                                  const debt = (inv.payment_status !== 'paid' && inv.remaining_amount) ? parseFloat(String(inv.remaining_amount)) : 0;
+                                  const today = new Date(); today.setHours(0, 0, 0, 0);
+                                  const dueD = due ? new Date(due) : null;
+                                  const paidD = paidDate ? new Date(paidDate) : null;
+                                  const daysOverdue = !isPaid && dueD ? Math.max(0, Math.floor((today.getTime() - dueD.getTime()) / 86400000)) : (isPaid && paidD && dueD ? Math.max(0, Math.floor((paidD.getTime() - dueD.getTime()) / 86400000)) : 0);
+                                  const daysEarly = isPaid && paidD && dueD ? Math.max(0, Math.floor((dueD.getTime() - paidD.getTime()) / 86400000)) : 0;
+                                  return (
+                                    <tr key={`p-${inv.id}`}>
+<td>{inv.received_invoice_number || inv.invoice_number || inv.id}</td>
+                                    <td>{issue}</td>
+                                    <td>{due}</td>
+                                    <td>{paidDate || '–'}</td>
+                                    <td>{formatMoney(inv.amount_total)}</td>
+                                    <td>
+                                      {!isPaid && daysOverdue > 0 && <span className="badge badge-danger" style={{ marginRight: 4 }}>Vėluoja {daysOverdue} d.</span>}
+                                      {isPaid && isOverdue && daysOverdue > 0 && <span className="badge badge-danger" style={{ marginRight: 4 }}>Apmokėta {daysOverdue} d. vėlu</span>}
+                                      {!isPaid && debt > 0 && <span className="badge badge-warning" style={{ marginRight: 4 }}>Skola: {formatMoney(debt)}</span>}
+                                        {isPaid && daysEarly > 0 && <span className="badge badge-success" style={{ marginRight: 4 }}>Apmokėta {daysEarly} d. anksčiau</span>}
+                                        {isPaid && daysEarly === 0 && isOnTime && <span className="badge badge-success">Laiku apmokėta</span>}
+                                        {isPaid && !isOnTime && !isOverdue && <span className="badge badge-info">Apmokėta</span>}
+                                        {!isPaid && daysOverdue === 0 && debt === 0 && (inv.payment_status_display || inv.payment_status)}
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          {Math.ceil(partnerPurchaseInvoices.length / FINANSAI_PAGE_SIZE) > 1 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                              <button type="button" className="button button-secondary" style={{ padding: '4px 10px' }} disabled={finansaiPurchasePage <= 1} onClick={() => setFinansaiPurchasePage((p) => Math.max(1, p - 1))}>Ankstesnis</button>
+                              <span>Puslapis {finansaiPurchasePage} iš {Math.ceil(partnerPurchaseInvoices.length / FINANSAI_PAGE_SIZE)}</span>
+                              <button type="button" className="button button-secondary" style={{ padding: '4px 10px' }} disabled={finansaiPurchasePage >= Math.ceil(partnerPurchaseInvoices.length / FINANSAI_PAGE_SIZE)} onClick={() => setFinansaiPurchasePage((p) => p + 1)}>Kitas</button>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 13, color: '#666' }}>Gautų sąskaitų nėra</div>
+                      )}
+                    </>
                   )}
                 </div>
+                )}
               </div>
             </div>
           </div>

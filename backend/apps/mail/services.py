@@ -333,34 +333,23 @@ def _start_ocr_for_attachment(attachment: MailAttachment):
 
 
 def _check_auto_match(mail_message: MailMessage):
-    """Patikrinti ar naujas laiškas gali būti automatiškai susietas su užsakymais."""
-    # Apsauga: nepriskirti laiškų kurie buvo priskirti rankiniu būdu
+    """Po OCR – vėl paleisti sutapimų logiką su nauju OCR tekstu ir įrašyti į DB (matches_computed_at)."""
     if mail_message.manually_assigned:
         logger.info(f'Laiškas {mail_message.id} buvo priskirtas rankiniu būdu - praleidžiama automatinė priskyrimas')
         return
 
-    # Surinkti visus OCR tekstus iš laiško priedų
-    ocr_texts = []
-    for attachment in mail_message.attachments.filter(ocr_processed=True):
-        if attachment.ocr_text:
-            ocr_texts.append(attachment.ocr_text)
-
-    if not ocr_texts:
+    has_new_ocr = any(
+        getattr(a, 'ocr_text', None) and (a.ocr_text or '').strip()
+        for a in mail_message.attachments.filter(ocr_processed=True)
+    )
+    if not has_new_ocr:
         return
 
-    combined_ocr = ' '.join(ocr_texts)
-
-    # Ieškoti užsakymų numerių
-    order_numbers = set(re.findall(r'[A-Z0-9][A-Z0-9\-/]{2,}', combined_ocr.upper()))
-
-    # Automatiškai susieti rastus numerius
-    for order_num in order_numbers:
-        try:
-            order = Order.objects.get(order_number__iexact=order_num)
-            mail_message.matched_orders.add(order)
-            logger.info(f'Automatiškai susietas laiškas su užsakymu: {order_num}')
-        except Order.DoesNotExist:
-            pass
+    try:
+        update_message_matches(mail_message)
+        logger.info(f'Po OCR atnaujinti laiško {mail_message.id} sutapimai (matches_computed_at)')
+    except Exception as e:
+        logger.warning(f'Nepavyko atnaujinti laiško {mail_message.id} sutapimų po OCR: {e}')
 
 
 def _sync_missing_attachments_from_server():

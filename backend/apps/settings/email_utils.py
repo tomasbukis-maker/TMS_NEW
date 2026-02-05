@@ -4,6 +4,16 @@ Email šablonų utility funkcijos
 from .models import EmailTemplate, NotificationSettings
 from typing import Dict, Optional
 
+# Visi galimi šablonų kintamieji – jei kontekste nėra, pakeičiama į tuščią (kad nebūtų literal {key})
+ALL_TEMPLATE_VARIABLE_KEYS = [
+    'invoice_number', 'issue_date', 'due_date', 'amount', 'amount_net', 'amount_total',
+    'vat_rate', 'payment_status', 'other_unpaid_invoices', 'overdue_days',
+    'order_number', 'client_order_number', 'order_date', 'route_from', 'route_to',
+    'loading_date', 'unloading_date', 'manager_name',
+    'partner_name', 'partner_code', 'partner_vat_code',
+    'price_net', 'price_with_vat', 'expedition_number',
+]
+
 
 def render_email_template(
     template_type: str,
@@ -66,7 +76,10 @@ def render_email_template(
         'contact_manager_notice': manager_notices.get(lang, manager_notices['lt']),
         'with_respect': with_respect.get(lang, with_respect['lt'])
     }
-    
+    # Visi galimi kintamieji – trūkstami užpildomi tuščiu, kad bet kuriame šablone nebūtų literal {key}
+    for key in ALL_TEMPLATE_VARIABLE_KEYS:
+        full_context.setdefault(key, '')
+
     # Pakeisti kintamuosius subject'e
     subject = template.subject
     for key, value in full_context.items():

@@ -5,6 +5,7 @@ from typing import Iterable, List, Sequence, Set
 
 from django.db import transaction
 from django.db.models.functions import Upper
+from django.utils import timezone
 
 from .models import MailMessage
 
@@ -162,40 +163,42 @@ def _collect_text_chunks(message: MailMessage) -> List[str]:
     for attachment in message.attachments.all():
         if attachment.filename:
             chunks.append(attachment.filename)
-            # Ištraukti tekstą iš PDF failų
-            pdf_text = _extract_pdf_text(attachment)
-            if pdf_text:
-                chunks.append(pdf_text)
+            # Naudoti išsaugotą OCR tekstą, jei yra (po OCR); kitaip ištraukti iš PDF
+            if getattr(attachment, 'ocr_text', None) and (attachment.ocr_text or '').strip():
+                chunks.append(attachment.ocr_text.strip())
+            else:
+                pdf_text = _extract_pdf_text(attachment)
+                if pdf_text:
+                    chunks.append(pdf_text)
+                    # OCR APODOROJIMAS: Ištraukti sąskaitos duomenis (tik kai dar nėra ocr_text)
+                    try:
+                        from apps.invoices.ocr_utils import process_pdf_attachment
+                        ocr_result = process_pdf_attachment(attachment)
 
-                # OCR APODOROJIMAS: Ištraukti sąskaitos duomenis
-                try:
-                    from apps.invoices.ocr_utils import process_pdf_attachment
-                    ocr_result = process_pdf_attachment(attachment)
+                        if ocr_result['success']:
+                            # Pridėti OCR duomenis į chunks
+                            data = ocr_result['extracted_data']
 
-                    if ocr_result['success']:
-                        # Pridėti OCR duomenis į chunks
-                        data = ocr_result['extracted_data']
+                            if data.get('invoice_number'):
+                                chunks.append(f"Sąskaitos nr: {data['invoice_number']}")
+                            if data.get('order_number'):
+                                chunks.append(f"Užsakymo nr: {data['order_number']}")
+                            if data.get('expedition_number'):
+                                chunks.append(f"Ekspedicijos nr: {data['expedition_number']}")
+                            if data.get('amounts'):
+                                chunks.append(f"Sumos: {', '.join(data['amounts'])}")
+                            if data.get('dates'):
+                                chunks.append(f"Datos: {', '.join(data['dates'])}")
 
-                        if data.get('invoice_number'):
-                            chunks.append(f"Sąskaitos nr: {data['invoice_number']}")
-                        if data.get('order_number'):
-                            chunks.append(f"Užsakymo nr: {data['order_number']}")
-                        if data.get('expedition_number'):
-                            chunks.append(f"Ekspedicijos nr: {data['expedition_number']}")
-                        if data.get('amounts'):
-                            chunks.append(f"Sumos: {', '.join(data['amounts'])}")
-                        if data.get('dates'):
-                            chunks.append(f"Datos: {', '.join(data['dates'])}")
+                            # Išsaugoti OCR rezultatus į žinutės metadata
+                            if not hasattr(message, 'ocr_results'):
+                                message.ocr_results = {}
+                            message.ocr_results[attachment.id] = ocr_result
 
-                        # Išsaugoti OCR rezultatus į žinutės metadata
-                        if not hasattr(message, 'ocr_results'):
-                            message.ocr_results = {}
-                        message.ocr_results[attachment.id] = ocr_result
+                            logger.info(f"OCR duomenys ištraukti iš priedo {attachment.filename}: {data}")
 
-                        logger.info(f"OCR duomenys ištraukti iš priedo {attachment.filename}: {data}")
-
-                except Exception as e:
-                    logger.warning(f"OCR apdorojimo klaida priede {attachment.filename}: {e}")
+                    except Exception as e:
+                        logger.warning(f"OCR apdorojimo klaida priede {attachment.filename}: {e}")
     return chunks
 
 
@@ -292,17 +295,24 @@ def update_message_matches(message: MailMessage) -> None:
         message.matched_sales_invoices.set(sales_invoices)
         message.matched_purchase_invoices.set(purchase_invoices)
 
+        # Pažymėti, kad sutapimai jau apskaičiuoti – sąrašuose nebepildome teksto skenavimo
+        message.matches_computed_at = timezone.now()
+        fields_to_update = ['matches_computed_at']
+
         # Jei dar neturime priskirto užsakymo, o radome aiškų kandidatą – pasižymime
         if orders and not message.related_order_id:
             message.related_order_id = orders[0].id
-            fields_to_update = ['related_order_id']
+            fields_to_update.append('related_order_id')
             if message.status == MailMessage.Status.NEW:
                 message.status = MailMessage.Status.LINKED
                 fields_to_update.append('status')
             message.save(update_fields=fields_to_update)
         elif message.status == MailMessage.Status.NEW and (orders or expeditions or sales_invoices or purchase_invoices):
             message.status = MailMessage.Status.LINKED
-            message.save(update_fields=['status'])
+            fields_to_update.append('status')
+            message.save(update_fields=fields_to_update)
+        else:
+            message.save(update_fields=fields_to_update)
 
 
 def update_matches_for_order(order_id: int) -> None:
